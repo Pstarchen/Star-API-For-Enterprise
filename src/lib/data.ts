@@ -1,4 +1,4 @@
-import type { ActivityLog, ApiCategory, ApiProduct, AppItem } from "./types";
+import type { ActivityLog, ApiCategory, ApiProduct, AppItem, PlatformUser } from "./types";
 
 export const categories: ApiCategory[] = [
   "全部",
@@ -182,4 +182,12 @@ export const usageSeries = [
   { date: "08-03", success: 108, failed: 3 },
   { date: "08-04", success: 132, failed: 6 },
   { date: "08-05", success: 147, failed: 4 },
+];
+
+export const platformUsers: PlatformUser[] = [
+  { id: "usr_8D21", name: "林知远", email: "lin.zy@example.com", accountType: "企业", plan: "企业版", workspace: "星海科技集团", calls: "628.4 万", balance: "¥36,842", status: "正常", joinedAt: "2025-02-18" },
+  { id: "usr_8C98", name: "陈默", email: "chenmo@example.com", accountType: "个人", plan: "个人专业版", workspace: "陈默的个人空间", calls: "18.6 万", balance: "¥126", status: "正常", joinedAt: "2026-07-22" },
+  { id: "usr_8C61", name: "赵清", email: "zhaoqing@example.com", accountType: "个人", plan: "免费版", workspace: "赵清的个人空间", calls: "2.4 万", balance: "¥0", status: "正常", joinedAt: "2026-07-18" },
+  { id: "usr_8B44", name: "周可", email: "zhouke@mingchen.cn", accountType: "企业", plan: "团队版", workspace: "明辰金融科技", calls: "182.7 万", balance: "¥8,420", status: "待认证", joinedAt: "2026-06-30" },
+  { id: "usr_89F2", name: "苏言", email: "suyan@example.com", accountType: "个人", plan: "免费版", workspace: "苏言的个人空间", calls: "8,642", balance: "¥20", status: "已冻结", joinedAt: "2026-05-12" },
 ];

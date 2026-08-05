@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookOpen, Boxes, LayoutDashboard, Menu, Search, X } from "lucide-react";
+import { Bell, BookOpen, Boxes, CreditCard, LayoutDashboard, Menu, Search, X } from "lucide-react";
 import { useState } from "react";
 import { BrandMark } from "./brand-mark";
 import { StatusRail } from "./status-rail";
@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 const links = [
   { href: "/", label: "API 市场", icon: Boxes },
   { href: "/docs", label: "接入文档", icon: BookOpen },
+  { href: "/pricing", label: "价格方案", icon: CreditCard },
   { href: "/console", label: "开发者控制台", icon: LayoutDashboard },
 ];
 
@@ -49,9 +50,8 @@ export function PortalHeader() {
               <Bell className="size-4" />
               <span className="absolute right-2 top-2 size-1.5 rounded-full bg-[var(--warning)]" />
             </button>
-            <Link href="/console" className="ml-1 rounded-[5px] bg-[var(--night)] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[var(--night-soft)]">
-              进入控制台
-            </Link>
+            <Link href="/login" className="ml-1 px-2 py-2 text-[12px] font-semibold text-[var(--muted)] hover:text-[var(--ink)]">登录</Link>
+            <Link href="/register" className="rounded-[5px] bg-[var(--brand)] px-4 py-2 text-[12px] font-semibold text-white hover:bg-[var(--brand-strong)]">免费注册</Link>
           </div>
           <button className="ml-auto grid size-9 place-items-center md:hidden" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label="打开导航菜单">
             {open ? <X className="size-5" /> : <Menu className="size-5" />}
@@ -64,6 +64,7 @@ export function PortalHeader() {
                 <item.icon className="size-4 text-[var(--muted)]" /> {item.label}
               </Link>
             ))}
+            <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[var(--line)] pt-3"><Link href="/login" onClick={() => setOpen(false)} className="flex h-10 items-center justify-center rounded-[4px] border border-[var(--line)] text-[11px] font-semibold">登录</Link><Link href="/register" onClick={() => setOpen(false)} className="flex h-10 items-center justify-center rounded-[4px] bg-[var(--brand)] text-[11px] font-semibold text-white">免费注册</Link></div>
           </nav>
         )}
       </div>

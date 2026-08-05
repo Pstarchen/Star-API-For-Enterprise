@@ -47,3 +47,18 @@ export type AppItem = {
   status: "运行中" | "已暂停";
   lastUsed: string;
 };
+
+export type AccountType = "个人" | "企业";
+
+export type PlatformUser = {
+  id: string;
+  name: string;
+  email: string;
+  accountType: AccountType;
+  plan: string;
+  workspace: string;
+  calls: string;
+  balance: string;
+  status: "正常" | "待认证" | "已冻结";
+  joinedAt: string;
+};
