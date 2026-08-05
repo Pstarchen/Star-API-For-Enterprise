@@ -4,9 +4,10 @@
 
 ## 已实现
 
-- API 市场：搜索、分类、排序、服务状态与价格展示
+- API 市场：首页展示精选接口，独立市场提供全量目录、搜索、分类、请求方法、计费方式、排序和列表/网格视图
 - API 详情：认证说明、参数文档、在线沙箱调试
-- 账户体系：个人/企业注册入口、登录界面、受众分层定价与工作空间切换
+- 账户体系：首次安装向导、个人/企业注册、scrypt 密码哈希、持久会话、登录限流与工作空间切换
+- 平台品牌：安装时配置网站名称、介绍、公开地址和图标，管理员可在后台随时更新并同步到门户、控制台与浏览器元数据
 - 用户控制台：调用概览、应用/密钥、请求日志、Webhook 与账单；企业空间额外承载成员权限和组织设置
 - 运营后台：个人/企业用户管理、API 生命周期、服务商准入、企业组织、风控、审计、网关监控与平台设置
 - 服务端接口：目录查询、沙箱调用、密钥生成、健康检查，统一使用 Zod 校验
@@ -19,18 +20,18 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000`。当前 UI 使用隔离在 `src/lib/data.ts` 的演示数据，不依赖数据库即可查看全部工作流。
+打开 `http://localhost:3000`。认证、租户、成员关系、会话与 API Key 使用 PostgreSQL 持久化；市场目录和部分运营图表仍由 `src/lib/data.ts` 提供可替换的展示数据。
 
 ## Docker 一键部署
 
 ```bash
 cp .env.docker.example .env
-# 使用 openssl rand -hex 32 分别替换 .env 中的三个敏感变量
+# 使用 openssl rand -hex 32 分别替换 .env 中的四个敏感变量
 docker compose config
 docker compose up -d --build
 ```
 
-启动后访问 `http://localhost:3000`，健康检查地址为 `http://localhost:3000/api/health`。升级、备份、回滚和反向代理建议见 [Docker 部署指南](docs/DEPLOYMENT.md)。
+启动后访问配置的 `SITE_ADDRESS`，首次进入 `/install` 创建平台管理员。健康检查地址为 `/api/health`，升级、备份、回滚和 HTTPS 说明见 [Docker 部署指南](docs/DEPLOYMENT.md)。
 
 需要启用数据库时：
 
@@ -70,13 +71,17 @@ docker-compose.yml       PostgreSQL 与 Redis 本地基础设施
 | --- | --- | --- |
 | `GET` | `/api/health` | 服务健康检查 |
 | `GET` | `/api/v1/catalog?q=&category=&method=` | API 目录查询 |
+| `GET/PATCH` | `/api/v1/admin/settings` | 管理员读取或更新平台品牌配置 |
+| `GET` | `/api/v1/branding/icon` | 返回数据库中保存的网站图标 |
 | `POST` | `/api/v1/playground` | 沙箱请求校验与响应 |
 | `POST` | `/api/v1/keys` | 一次性签发密钥明文 |
-| `POST` | `/api/v1/auth/register` | 校验个人/企业注册数据并返回演示工作空间 |
+| `GET/POST` | `/api/v1/install` | 查询初始化状态并完成首次安装 |
+| `POST` | `/api/v1/auth/register` | 创建个人/企业账号、工作区与会话 |
+| `POST` | `/api/v1/auth/login` | 校验密码并创建持久会话 |
+| `POST` | `/api/v1/auth/logout` | 撤销当前会话 |
+| `GET` | `/api/v1/auth/me` | 返回当前账号与工作区 |
 
-`/api/v1/auth/register` 和登录页当前用于演示前后端契约，不写入数据库，也不建立持久会话。生产接入需补齐密码哈希、邮箱验证、会话、找回密码、限流和 RBAC 强制校验。
-
-`/api/v1/keys` 当前只演示安全生成和单次返回语义。生产环境必须配置 `API_KEY_PEPPER`，否则接口会返回 `503`；正式接入前还要在路由前增加用户会话、资源级权限判断和审计写入，并且只保存 `secretHash`。
+`/api/v1/keys` 需要有效用户会话和应用所属工作区权限。生产环境必须配置 `API_KEY_PEPPER`；密钥明文只在创建响应中返回一次，数据库仅保存 `secretHash`。
 
 ## 生产化路线
 

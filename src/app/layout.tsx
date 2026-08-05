@@ -1,18 +1,29 @@
 import type { Metadata } from "next";
+import { connection } from "next/server";
+import { BrandingProvider } from "@/components/branding-provider";
+import { platformIconUrl } from "@/lib/platform";
+import { getPlatformConfig } from "@/lib/server/installation";
 import "./globals.css";
 
-export const metadata: Metadata = {
-  title: {
-    default: "星枢 API - 企业级接口服务平台",
-    template: "%s | 星枢 API",
-  },
-  description: "面向企业的公共 API 聚合、分发、治理与观测平台。",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  await connection();
+  const config = await getPlatformConfig();
+  return {
+    title: { default: `${config.name} - API 开放分发平台`, template: `%s | ${config.name}` },
+    description: config.description,
+    ...(config.hasCustomIcon ? { icons: { icon: platformIconUrl(config) } } : {}),
+  };
+}
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  await connection();
+  const config = await getPlatformConfig();
   return (
-    <html lang="zh-CN" data-scroll-behavior="smooth">
-      <body>{children}</body>
+    <html lang="zh-CN" data-scroll-behavior="smooth" data-theme="light" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: `try{const t=localStorage.getItem("star-api-theme");const s=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t||s;document.documentElement.style.colorScheme=t||s}catch{}` }} />
+      </head>
+      <body><BrandingProvider config={config}>{children}</BrandingProvider></body>
     </html>
   );
 }

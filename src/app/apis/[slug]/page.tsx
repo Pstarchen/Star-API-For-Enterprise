@@ -26,7 +26,7 @@ export default async function ApiDetailPage({ params }: PageProps<"/apis/[slug]"
     <PortalShell>
       <div className="border-b border-[var(--line)] bg-white">
         <div className="container-shell py-7">
-          <Link href="/" className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)] hover:text-[var(--ink)]"><ArrowLeft className="size-3" /> 返回 API 市场</Link>
+          <Link href="/marketplace" className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)] hover:text-[var(--ink)]"><ArrowLeft className="size-3" /> 返回 API 市场</Link>
           <div className="mt-6 flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
             <div className="flex items-start gap-4">
               <span className="grid size-14 shrink-0 place-items-center rounded-[6px] text-base font-bold text-white" style={{ backgroundColor: api.color }}>{api.shortName}</span>

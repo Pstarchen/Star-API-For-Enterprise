@@ -15,6 +15,10 @@ ENV DATABASE_URL="postgresql://starapi:build-only@postgres:5432/starapi?schema=p
 RUN npx prisma generate
 RUN npm run build
 
+FROM dependencies AS migrator
+COPY prisma ./prisma
+CMD ["npx", "prisma", "migrate", "deploy"]
+
 FROM ${NODE_IMAGE} AS runner
 WORKDIR /app
 ENV NODE_ENV=production \
