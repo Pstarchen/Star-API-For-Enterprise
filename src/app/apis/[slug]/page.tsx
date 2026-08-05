@@ -1,64 +1,25 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, BadgeCheck, BookOpen, Check, CircleGauge, Clock3, Copy, ExternalLink, KeyRound, ShieldCheck } from "lucide-react";
+import { ArrowLeft, BadgeCheck, BookOpen, CircleGauge, Clock3, ExternalLink, KeyRound, ShieldCheck } from "lucide-react";
 import { PortalShell } from "@/components/portal-shell";
 import { RequestPlayground } from "@/components/request-playground";
-import { apiProducts } from "@/lib/data";
+import { getCatalogProduct } from "@/lib/server/catalog";
+import { getPlatformConfig } from "@/lib/server/installation";
 import { cn, getMethodClass } from "@/lib/utils";
 
-export function generateStaticParams() {
-  return apiProducts.map((api) => ({ slug: api.slug }));
-}
-
 export async function generateMetadata({ params }: PageProps<"/apis/[slug]">): Promise<Metadata> {
-  const { slug } = await params;
-  const api = apiProducts.find((item) => item.slug === slug);
+  const api = await getCatalogProduct((await params).slug);
   return { title: api?.name ?? "API 详情", description: api?.description };
 }
 
 export default async function ApiDetailPage({ params }: PageProps<"/apis/[slug]">) {
-  const { slug } = await params;
-  const api = apiProducts.find((item) => item.slug === slug);
+  const api = await getCatalogProduct((await params).slug);
   if (!api) notFound();
-
-  return (
-    <PortalShell>
-      <div className="border-b border-[var(--line)] bg-white">
-        <div className="container-shell py-7">
-          <Link href="/marketplace" className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)] hover:text-[var(--ink)]"><ArrowLeft className="size-3" /> 返回 API 市场</Link>
-          <div className="mt-6 flex flex-col justify-between gap-5 lg:flex-row lg:items-start">
-            <div className="flex items-start gap-4">
-              <span className="grid size-14 shrink-0 place-items-center rounded-[6px] text-base font-bold text-white" style={{ backgroundColor: api.color }}>{api.shortName}</span>
-              <div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{api.name}</h1><BadgeCheck className="size-5 fill-[var(--brand)] text-white" /><span className="rounded-[3px] bg-[var(--surface-subtle)] px-2 py-1 text-[9px] text-[var(--muted)]">v1.8.2</span></div><p className="mt-2 max-w-2xl text-[13px] leading-6 text-[var(--muted)]">{api.description}</p><p className="mt-2 text-[10px] text-[var(--muted)]">由 <strong className="font-semibold text-[var(--ink)]">{api.provider}</strong> 提供 · 最近更新 2026-08-02</p></div>
-            </div>
-            <div className="flex gap-2"><Link href="/console/apps" className="inline-flex h-10 items-center gap-2 rounded-[4px] border border-[var(--line-strong)] px-4 text-[11px] font-semibold hover:bg-[var(--surface-subtle)]"><KeyRound className="size-3.5" /> 获取密钥</Link><a href="#debug" className="inline-flex h-10 items-center gap-2 rounded-[4px] bg-[var(--brand)] px-4 text-[11px] font-semibold text-white hover:bg-[var(--brand-strong)]">立即调试 <ExternalLink className="size-3.5" /></a></div>
-          </div>
-          <div className="mt-7 grid grid-cols-2 gap-px overflow-hidden border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4">
-            <div className="bg-white p-4"><span className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"><CircleGauge className="size-3" /> 平均响应</span><strong className="mt-1 block text-lg">{api.latency} ms</strong></div>
-            <div className="bg-white p-4"><span className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"><ShieldCheck className="size-3" /> 可用性</span><strong className="mt-1 block text-lg">{api.uptime}%</strong></div>
-            <div className="bg-white p-4"><span className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"><Clock3 className="size-3" /> 默认限流</span><strong className="mt-1 block text-lg">200 QPS</strong></div>
-            <div className="bg-white p-4"><span className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"><BookOpen className="size-3" /> 计费价格</span><strong className="mt-1 block text-lg">{api.price}</strong></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="container-shell grid gap-8 py-8 lg:grid-cols-[minmax(0,1fr)_260px]">
-        <article className="min-w-0 space-y-9">
-          <section><p className="eyebrow">ENDPOINT</p><h2 className="mt-2 text-lg font-bold">请求端点</h2><div className="mt-4 flex h-12 min-w-0 items-center border border-[var(--line-strong)] bg-white"><span className={cn("mono grid h-full place-items-center px-4 text-[11px] font-bold", getMethodClass(api.method))}>{api.method}</span><code className="mono min-w-0 flex-1 truncate px-4 text-[12px]">https://gateway.starapi.cn{api.endpoint}</code><button className="mr-2 grid size-8 place-items-center text-[var(--muted)] hover:bg-[var(--surface-subtle)]" aria-label="复制端点" title="复制端点"><Copy className="size-3.5" /></button></div></section>
-
-          <section><p className="eyebrow">AUTHENTICATION</p><h2 className="mt-2 text-lg font-bold">身份认证</h2><p className="mt-2 text-[12px] leading-6 text-[var(--muted)]">将控制台生成的 API Key 放入请求头。生产密钥只在创建时完整显示一次，请勿写入客户端代码。</p><pre className="mono mt-4 overflow-x-auto border-l-2 border-[var(--brand)] bg-[var(--night)] p-4 text-[11px] text-[#c8e8dd]"><code>Authorization: Bearer sk_live_xxxxxxxxxxxx</code></pre></section>
-
-          <section><p className="eyebrow">PARAMETERS</p><h2 className="mt-2 text-lg font-bold">请求参数</h2><div className="mt-4 overflow-x-auto border border-[var(--line)] bg-white"><table className="w-full min-w-[620px] text-left text-[11px]"><thead className="bg-[var(--surface-subtle)] text-[var(--muted)]"><tr><th className="px-4 py-3 font-semibold">参数</th><th className="px-4 py-3 font-semibold">类型</th><th className="px-4 py-3 font-semibold">必填</th><th className="px-4 py-3 font-semibold">说明</th></tr></thead><tbody className="divide-y divide-[var(--line)]"><tr><td className="mono px-4 py-3 font-semibold">companyName</td><td className="mono px-4 py-3 text-[var(--muted)]">string</td><td className="px-4 py-3 text-[var(--danger)]">是</td><td className="px-4 py-3 text-[var(--muted)]">企业全称或统一社会信用代码</td></tr><tr><td className="mono px-4 py-3 font-semibold">fields</td><td className="mono px-4 py-3 text-[var(--muted)]">string[]</td><td className="px-4 py-3">否</td><td className="px-4 py-3 text-[var(--muted)]">返回字段组：basic、risk、contact</td></tr></tbody></table></div></section>
-
-          <section id="debug" className="scroll-mt-28"><p className="eyebrow">PLAYGROUND</p><h2 className="mt-2 text-lg font-bold">在线请求调试</h2><p className="mt-2 text-[12px] text-[var(--muted)]">沙箱响应使用脱敏测试数据，不产生正式调用费用。</p><div className="mt-4"><RequestPlayground api={api} /></div></section>
-        </article>
-
-        <aside className="space-y-4 lg:sticky lg:top-28 lg:self-start">
-          <div className="panel p-4"><p className="eyebrow">SERVICE LEVEL</p><ul className="mt-3 space-y-3 text-[11px]"><li className="flex items-center gap-2"><Check className="size-3.5 text-[var(--brand)]" /> 99.95% SLA 保障</li><li className="flex items-center gap-2"><Check className="size-3.5 text-[var(--brand)]" /> 国内多节点容灾</li><li className="flex items-center gap-2"><Check className="size-3.5 text-[var(--brand)]" /> 7×24 小时故障响应</li><li className="flex items-center gap-2"><Check className="size-3.5 text-[var(--brand)]" /> 数据传输全程加密</li></ul></div>
-          <div className="panel p-4"><p className="eyebrow">SUPPORT</p><p className="mt-3 text-[11px] leading-5 text-[var(--muted)]">企业客户可获得专属技术支持、发票与合同服务。</p><button className="mt-3 text-[11px] font-semibold text-[var(--brand)]">联系企业顾问 →</button></div>
-        </aside>
-      </div>
-    </PortalShell>
-  );
+  const platform = await getPlatformConfig();
+  const gatewayPath = `/api/v1/gateway/${api.slug}${api.endpoint === "/" ? "" : api.endpoint}`;
+  const gatewayUrl = `${platform.publicUrl.replace(/\/+$/, "")}${gatewayPath}`;
+  return <PortalShell><div className="border-b border-[var(--line)] bg-[var(--surface)]"><div className="container-shell py-7"><Link href="/marketplace" className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]"><ArrowLeft className="size-3" />返回 API 市场</Link><div className="mt-6 flex flex-col justify-between gap-5 lg:flex-row"><div className="flex items-start gap-4"><span className="grid size-14 shrink-0 place-items-center rounded-[8px] text-base font-bold text-white" style={{ background: api.color }}>{api.shortName}</span><div><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{api.name}</h1>{api.verified && <BadgeCheck className="size-5 fill-[var(--brand)] text-white" />}<span className="rounded-[4px] bg-[var(--surface-subtle)] px-2 py-1 text-[9px]">{api.version ?? "未标记版本"}</span></div><p className="mt-2 max-w-2xl text-[13px] leading-6 text-[var(--muted)]">{api.description}</p><p className="mt-2 text-[10px] text-[var(--muted)]">由 <strong className="text-[var(--ink)]">{api.provider}</strong> 提供 · 更新于 {new Date(api.updatedAt).toLocaleDateString("zh-CN")}</p></div></div><div className="flex gap-2"><Link href="/console/apps" className="inline-flex h-10 items-center gap-2 rounded-[6px] border border-[var(--line)] px-4 text-[11px] font-semibold"><KeyRound className="size-3.5" />管理密钥</Link><a href="#debug" className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[11px] font-semibold text-white">真实调试 <ExternalLink className="size-3.5" /></a></div></div><div className="mt-7 grid grid-cols-2 gap-px overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4"><Stat icon={CircleGauge} label="平均响应" value={api.latency == null ? "暂无数据" : `${api.latency} ms`} /><Stat icon={ShieldCheck} label="真实可用率" value={api.uptime == null ? "暂无数据" : `${api.uptime}%`} /><Stat icon={Clock3} label="默认限流" value={`${api.qpsLimit} QPS`} /><Stat icon={BookOpen} label="计费价格" value={api.price} /></div></div></div><div className="container-shell grid gap-8 py-8 lg:grid-cols-[minmax(0,1fr)_260px]"><article className="min-w-0 space-y-8"><section><p className="eyebrow">ENDPOINT</p><h2 className="mt-2 text-lg font-bold">请求端点</h2><div className="mt-4 flex min-h-12 min-w-0 items-center overflow-hidden rounded-[7px] border border-[var(--line-strong)] bg-[var(--surface)]"><span className={cn("mono grid self-stretch place-items-center px-4 text-[10px] font-bold", getMethodClass(api.method))}>{api.method}</span><code className="mono min-w-0 flex-1 overflow-x-auto px-4 py-3 text-[11px]">{gatewayUrl}</code></div></section><section><p className="eyebrow">AUTHENTICATION</p><h2 className="mt-2 text-lg font-bold">身份认证</h2><pre className="mono mt-4 overflow-x-auto rounded-[7px] border-l-2 border-[var(--brand)] bg-[var(--night)] p-4 text-[10px] text-[#c8e8dd]"><code>Authorization: Bearer $STAR_API_KEY</code></pre></section><section><p className="eyebrow">SCHEMA</p><h2 className="mt-2 text-lg font-bold">端点 Schema</h2><pre className="mono mt-4 max-h-96 overflow-auto rounded-[7px] border border-[var(--line)] bg-[var(--surface)] p-4 text-[10px] leading-5"><code>{JSON.stringify(api.schema, null, 2)}</code></pre></section><section id="debug" className="scroll-mt-28"><p className="eyebrow">PLAYGROUND</p><h2 className="mt-2 text-lg font-bold">在线请求调试</h2><p className="mt-2 text-[11px] text-[var(--muted)]">请求通过正式网关执行，并按该 API 的订阅规则计量与计费。</p><div className="mt-4"><RequestPlayground api={api} gatewayUrl={gatewayPath} /></div></section></article><aside className="space-y-4 lg:sticky lg:top-28 lg:self-start"><div className="panel p-4"><p className="eyebrow">SERVICE LEVEL</p><dl className="mt-3 space-y-3 text-[10px]"><div className="flex justify-between"><dt className="text-[var(--muted)]">配置 SLA</dt><dd>{api.sla}%</dd></div><div className="flex justify-between"><dt className="text-[var(--muted)]">累计真实调用</dt><dd>{api.calls.toLocaleString("zh-CN")}</dd></div><div className="flex justify-between"><dt className="text-[var(--muted)]">执行方式</dt><dd>{api.executionMode === "INTERNAL" ? "内置" : "外部转发"}</dd></div></dl></div></aside></div></PortalShell>;
 }
+
+function Stat({ icon: Icon, label, value }: { icon: typeof CircleGauge; label: string; value: string }) { return <div className="bg-[var(--surface)] p-4"><span className="flex items-center gap-1.5 text-[9px] text-[var(--muted)]"><Icon className="size-3" />{label}</span><strong className="mt-1 block text-[13px]">{value}</strong></div>; }

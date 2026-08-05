@@ -1,3 +1,9 @@
+import { connection } from "next/server";
 import { ResourceTablePage } from "@/components/resource-table-page";
-const data = [["14:28:42", "林知远", "更新 API 定价", "企业工商信息核验", "admin_07", "上海 / 10.24.8.6"], ["14:16:20", "陈安", "批准服务上架", "全国实时天气", "admin_12", "北京 / 10.12.2.8"], ["13:58:04", "系统策略", "冻结异常密钥", "sk_live_3bc1••••", "system", "网关自动化"], ["13:42:19", "周可", "导出租户报表", "2026-08-05 租户清单", "admin_03", "杭州 / 10.31.6.2"]];
-export default function AuditsPage() { return <ResourceTablePage eyebrow="AUDIT TRAIL" title="审计日志" description="记录高权限操作及其主体、目标、来源和时间，不允许人工修改。" action="创建审计订阅" columns={["时间", "操作人", "动作", "资源", "主体 ID", "来源"]} rows={data.map((row) => row.map((cell, index) => index === 4 ? <code key={cell} className="mono">{cell}</code> : cell))} />; }
+import { prisma } from "@/lib/server/prisma";
+
+export default async function AuditsPage() {
+  await connection();
+  const logs = await prisma.auditLog.findMany({ include: { actor: true, tenant: true }, orderBy: { occurredAt: "desc" }, take: 200 });
+  return <ResourceTablePage eyebrow="AUDIT TRAIL" title="审计日志" description="只读展示最近 200 条真实高权限与业务变更记录。" columns={["时间", "操作人", "动作", "资源", "资源 ID", "工作区", "来源 IP"]} rows={logs.map((log) => [log.occurredAt.toLocaleString("zh-CN"), log.actor?.name ?? "系统", log.action, log.resource, <code key="id" className="mono">{log.resourceId ?? "-"}</code>, log.tenant?.name ?? "平台级", log.ipAddress ?? "未记录"])} />;
+}

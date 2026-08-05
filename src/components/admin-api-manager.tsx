@@ -1,150 +1,86 @@
 "use client";
 
-import {
-  CheckCircle2,
-  ChevronDown,
-  Download,
-  MoreHorizontal,
-  Plus,
-  Search,
-  X,
-} from "lucide-react";
+import { CheckCircle2, ChevronDown, Download, Loader2, Plus, Search, Trash2, X } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
-import { apiProducts, categories } from "@/lib/data";
-import type { ApiCategory, ApiProduct } from "@/lib/types";
+import { apiCategories, type CatalogProduct } from "@/lib/catalog";
+import { internalHandlerTemplates } from "@/lib/internal-handlers";
 
-type ManagedApi = ApiProduct & {
-  version: string;
-  status: "已上架" | "草稿";
-  access: "免费" | "按量计费" | "套餐内";
-};
+const statusNames = { DRAFT: "草稿", REVIEW: "审核中", PUBLISHED: "已发布", DEPRECATED: "已弃用", OFFLINE: "已下线" } as const;
+const inputClass = "h-10 w-full rounded-[6px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[11px] outline-none focus:border-[var(--brand)]";
 
-type ApiForm = {
-  name: string;
-  endpoint: string;
-  method: ApiProduct["method"];
-  category: Exclude<ApiCategory, "全部">;
-  provider: string;
-  access: ManagedApi["access"];
-  price: string;
-};
-
-const initialApis: ManagedApi[] = apiProducts.map((api, index) => ({
-  ...api,
-  version: `v1.${8 - (index % 3)}.0`,
-  status: "已上架",
-  access: api.price.startsWith("免费") ? "免费" : "按量计费",
-}));
-
-const emptyForm: ApiForm = {
-  name: "",
-  endpoint: "/v1/",
-  method: "POST",
-  category: "企业数据",
-  provider: "",
-  access: "按量计费",
-  price: "¥0.03 / 次",
-};
-
-export function AdminApiManager() {
+export function AdminApiManager({ initialApis }: { initialApis: CatalogProduct[] }) {
   const [apis, setApis] = useState(initialApis);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<"全部" | ManagedApi["status"]>("全部");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [form, setForm] = useState<ApiForm>(emptyForm);
+  const [executionMode, setExecutionMode] = useState<"INTERNAL" | "EXTERNAL">("EXTERNAL");
+  const [authType, setAuthType] = useState("NONE");
+  const [billingMode, setBillingMode] = useState<"FREE" | "PER_REQUEST">("FREE");
+  const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
 
-  const filteredApis = useMemo(() => {
+  const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return apis.filter((api) => {
-      const matchesQuery = !keyword || [api.name, api.endpoint, api.provider].some((value) => value.toLowerCase().includes(keyword));
-      return matchesQuery && (status === "全部" || api.status === status);
-    });
-  }, [apis, query, status]);
+    return apis.filter((api) => !keyword || [api.name, api.slug, api.provider, api.category].join(" ").toLowerCase().includes(keyword));
+  }, [apis, query]);
 
-  function updateForm<Key extends keyof ApiForm>(key: Key, value: ApiForm[Key]) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
-  function closeDialog() {
-    setDialogOpen(false);
-    setForm(emptyForm);
-  }
-
-  function createApi(event: FormEvent<HTMLFormElement>) {
+  async function createApi(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const endpoint = form.endpoint.startsWith("/") ? form.endpoint : `/${form.endpoint}`;
-    const newApi: ManagedApi = {
-      id: `api_${Date.now()}`,
-      slug: form.name.toLowerCase().replace(/\s+/g, "-"),
-      name: form.name.trim(),
-      shortName: form.name.trim().slice(0, 2).toUpperCase(),
-      category: form.category,
-      description: "待补充接口能力说明与请求示例。",
-      method: form.method,
-      endpoint,
-      latency: 0,
-      uptime: 100,
-      calls: "0",
-      price: form.access === "免费" ? "免费" : form.access === "套餐内" ? "套餐内" : form.price.trim(),
-      tags: [form.access],
-      provider: form.provider.trim(),
-      color: "#08785d",
-      version: "v1.0.0",
-      status: "草稿",
-      access: form.access,
-    };
-    setApis((current) => [newApi, ...current]);
-    setNotice(`${newApi.name} 已创建为草稿`);
-    closeDialog();
+    setSaving(true);
+    setError("");
+    const form = new FormData(event.currentTarget);
+    const tags = String(form.get("tags") ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+    const payload = Object.fromEntries(form.entries());
+    try {
+      const response = await fetch("/api/v1/admin/apis", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payload, tags, featured: form.get("featured") === "on", allowPrivateNetwork: form.get("allowPrivateNetwork") === "on", executionMode, billingMode, unitPrice: form.get("unitPrice") || 0 }) });
+      const result = await response.json();
+      if (!response.ok) { setError(result.message ?? "API 创建失败"); return; }
+      setApis((current) => [result.data, ...current]);
+      setNotice(`${result.data.name} 已创建为草稿`);
+      setDialogOpen(false);
+    } catch { setError("无法连接 API 管理服务"); }
+    finally { setSaving(false); }
+  }
+
+  async function changeStatus(api: CatalogProduct, status: CatalogProduct["status"]) {
+    const response = await fetch("/api/v1/admin/apis", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: api.id, status }) });
+    const result = await response.json();
+    if (!response.ok) { setError(result.message ?? "状态更新失败"); return; }
+    setApis((current) => current.map((item) => item.id === api.id ? result.data : item));
+    setNotice(`${api.name} 已更新为${statusNames[status]}`);
+  }
+
+  async function deleteApi(api: CatalogProduct) {
+    if (!window.confirm(`确认删除“${api.name}”？该操作不可撤销。`)) return;
+    const response = await fetch(`/api/v1/admin/apis?id=${encodeURIComponent(api.id)}`, { method: "DELETE" });
+    const result = await response.json();
+    if (!response.ok) { setError(result.message ?? "删除失败"); return; }
+    setApis((current) => current.filter((item) => item.id !== api.id));
+    setNotice(`${api.name} 已删除`);
   }
 
   function exportApis() {
-    const rows = filteredApis.map((api) => [api.name, api.provider, api.method, api.endpoint, api.version, api.access, api.status]);
-    const csv = ["API,服务商,方法,路径,版本,计费方式,状态", ...rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(","))].join("\n");
+    const rows = filtered.map((api) => [api.name, api.slug, api.provider, api.method, api.endpoint, api.executionMode, api.price, statusNames[api.status]]);
+    const csv = ["API,标识,服务商,方法,路径,接入方式,计费,状态", ...rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))].join("\n");
     const url = URL.createObjectURL(new Blob(["\ufeff", csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "star-api-list.csv";
-    link.click();
-    URL.revokeObjectURL(url);
+    const link = document.createElement("a"); link.href = url; link.download = "star-api-list.csv"; link.click(); URL.revokeObjectURL(url);
   }
 
   return <div className="mx-auto max-w-[1440px] space-y-5">
-    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
-      <div><p className="eyebrow">API GOVERNANCE</p><h2 className="mt-1 text-xl font-bold">API 生命周期管理</h2><p className="mt-1 text-[11px] text-[var(--muted)]">管理服务准入、版本、定价、SLA 与上下架流程。</p></div>
-      <button onClick={() => setDialogOpen(true)} className="inline-flex h-9 items-center justify-center gap-2 rounded-[4px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white"><Plus className="size-3.5" /> 新建 API</button>
-    </div>
-
-    {notice && <div role="status" className="flex items-center justify-between rounded-[4px] border border-[#c8e2d8] bg-[var(--brand-soft)] px-3 py-2.5 text-[10px] text-[var(--brand-strong)]"><span className="inline-flex items-center gap-2"><CheckCircle2 className="size-3.5" />{notice}</span><button onClick={() => setNotice("")} aria-label="关闭提示"><X className="size-3.5" /></button></div>}
-
-    <section className="panel overflow-hidden">
-      <div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 lg:flex-row">
-        <label className="flex h-9 flex-1 items-center gap-2 border border-[var(--line)] px-3 lg:max-w-sm"><Search className="size-3.5 text-[var(--muted)]" /><span className="sr-only">搜索 API</span><input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 text-[10px] outline-none" placeholder="名称、路径或服务商" /></label>
-        <label className="relative"><span className="sr-only">筛选状态</span><select value={status} onChange={(event) => setStatus(event.target.value as typeof status)} className="h-9 min-w-32 appearance-none border border-[var(--line)] bg-white pl-3 pr-8 text-[10px]"><option>全部</option><option>已上架</option><option>草稿</option></select><ChevronDown className="pointer-events-none absolute right-2.5 top-3 size-3 text-[var(--muted)]" /></label>
-        <button onClick={exportApis} className="inline-flex h-9 items-center justify-center gap-2 border border-[var(--line)] px-3 text-[10px]"><Download className="size-3" /> 导出</button>
-      </div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-[10px]"><thead className="bg-[var(--surface-subtle)] text-[var(--muted)]"><tr><th className="px-4 py-3 font-medium">API</th><th className="px-4 py-3 font-medium">服务商</th><th className="px-4 py-3 font-medium">版本 / 路径</th><th className="px-4 py-3 font-medium">计费</th><th className="px-4 py-3 font-medium">SLA</th><th className="px-4 py-3 font-medium">状态</th><th className="px-4 py-3"><span className="sr-only">操作</span></th></tr></thead>
-        <tbody className="divide-y divide-[var(--line)]">{filteredApis.map((api) => <tr key={api.id} className="hover:bg-[var(--surface-subtle)]"><td className="px-4 py-3"><div className="flex items-center gap-2.5"><span className="grid size-7 shrink-0 place-items-center rounded-[4px] text-[9px] font-bold text-white" style={{ background: api.color }}>{api.shortName}</span><span><strong className="block">{api.name}</strong><small className={`mt-0.5 block font-semibold ${api.method === "GET" ? "text-[#28609a]" : "text-[var(--brand)]"}`}>{api.method} · {api.category}</small></span></div></td><td className="px-4 py-3 text-[var(--muted)]">{api.provider}</td><td className="px-4 py-3"><span className="block">{api.version}</span><code className="mono mt-0.5 block text-[8px] text-[var(--muted)]">{api.endpoint}</code></td><td className="px-4 py-3"><span className="block">{api.access}</span><small className="text-[8px] text-[var(--muted)]">{api.price}</small></td><td className="px-4 py-3">{api.uptime}%</td><td className="px-4 py-3"><span className={`inline-flex items-center gap-1 rounded-[3px] px-2 py-1 text-[9px] ${api.status === "已上架" ? "bg-[var(--brand-soft)] text-[var(--brand-strong)]" : "bg-[var(--warning-soft)] text-[#784707]"}`}><span className={`size-1.5 rounded-full ${api.status === "已上架" ? "bg-[var(--brand)]" : "bg-[var(--warning)]"}`} />{api.status}</span></td><td className="px-4 py-3"><button aria-label={`${api.name}更多操作`} className="grid size-7 place-items-center"><MoreHorizontal className="size-4 text-[var(--muted)]" /></button></td></tr>)}</tbody>
-      </table></div>
-      <div className="flex items-center justify-between border-t border-[var(--line)] px-4 py-3 text-[9px] text-[var(--muted)]"><span>显示 {filteredApis.length} / {apis.length} 个 API</span><span>草稿需完成文档与网关校验后发布</span></div>
+    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end"><div><p className="eyebrow">API GOVERNANCE</p><h2 className="mt-1 text-xl font-bold">API 生命周期管理</h2><p className="mt-1 text-[11px] text-[var(--muted)]">配置真实上游或内置处理器，并统一执行鉴权、限流、计量与计费。</p></div><button onClick={() => { setDialogOpen(true); setError(""); }} className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white"><Plus className="size-3.5" />新建 API</button></div>
+    {notice && <div role="status" className="flex items-center justify-between rounded-[6px] border border-[#c8e2d8] bg-[var(--brand-soft)] px-3 py-2.5 text-[10px] text-[var(--brand-strong)]"><span className="inline-flex items-center gap-2"><CheckCircle2 className="size-3.5" />{notice}</span><button onClick={() => setNotice("")} aria-label="关闭提示"><X className="size-3.5" /></button></div>}
+    {error && !dialogOpen && <p role="alert" className="rounded-[6px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{error}</p>}
+    <section className="panel overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 sm:flex-row"><label className="flex h-9 flex-1 items-center gap-2 rounded-[6px] border border-[var(--line)] px-3 sm:max-w-sm"><Search className="size-3.5 text-[var(--muted)]" /><input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 text-[10px] outline-none" placeholder="名称、标识、服务商或分类" /></label><button onClick={exportApis} disabled={!filtered.length} className="inline-flex h-9 items-center justify-center gap-2 rounded-[6px] border border-[var(--line)] px-3 text-[10px] disabled:opacity-50"><Download className="size-3.5" />导出</button></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[1050px] text-left text-[10px]"><thead className="bg-[var(--surface-subtle)] text-[var(--muted)]"><tr><th className="px-4 py-3">API</th><th className="px-4 py-3">端点</th><th className="px-4 py-3">执行</th><th className="px-4 py-3">计费</th><th className="px-4 py-3">真实调用</th><th className="px-4 py-3">状态</th><th className="px-4 py-3">操作</th></tr></thead><tbody className="divide-y divide-[var(--line)]">{filtered.map((api) => <tr key={api.id} className="hover:bg-[var(--surface-subtle)]"><td className="px-4 py-3"><div className="flex items-center gap-2.5"><span className="grid size-8 place-items-center rounded-[6px] text-[9px] font-bold text-white" style={{ background: api.color }}>{api.shortName}</span><span><strong className="block">{api.name}</strong><small className="text-[8px] text-[var(--muted)]">{api.provider} · {api.slug}</small></span></div></td><td className="px-4 py-3"><strong className="text-[var(--brand)]">{api.method}</strong><code className="mono ml-2 text-[9px]">{api.endpoint}</code></td><td className="px-4 py-3">{api.executionMode === "INTERNAL" ? "内置处理器" : "外部转发"}</td><td className="px-4 py-3">{api.price}</td><td className="px-4 py-3">{api.calls.toLocaleString("zh-CN")} 次</td><td className="px-4 py-3"><label className="relative inline-block"><select value={api.status} onChange={(event) => changeStatus(api, event.target.value as CatalogProduct["status"])} className="h-8 appearance-none rounded-[5px] border border-[var(--line)] bg-[var(--surface)] pl-2 pr-7 text-[9px]"><option value="DRAFT">草稿</option><option value="REVIEW">审核中</option><option value="PUBLISHED">已发布</option><option value="DEPRECATED">已弃用</option><option value="OFFLINE">已下线</option></select><ChevronDown className="pointer-events-none absolute right-2 top-2.5 size-3" /></label></td><td className="px-4 py-3"><button onClick={() => deleteApi(api)} className="grid size-8 place-items-center rounded-[5px] text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]" title="删除 API" aria-label={`删除 ${api.name}`}><Trash2 className="size-3.5" /></button></td></tr>)}</tbody></table></div>
+      {!filtered.length && <div className="px-5 py-14 text-center"><p className="text-[12px] font-semibold">暂无 API</p><p className="mt-1 text-[10px] text-[var(--muted)]">创建并发布真实接口后，才会出现在 API 市场。</p></div>}
+      <div className="border-t border-[var(--line)] px-4 py-3 text-[9px] text-[var(--muted)]">共 {filtered.length} 条真实记录</div>
     </section>
-
-    {dialogOpen && <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/35 p-4" role="presentation" onMouseDown={closeDialog}><form onSubmit={createApi} role="dialog" aria-modal="true" aria-labelledby="new-api-title" className="my-auto w-full max-w-2xl rounded-[6px] bg-white shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 id="new-api-title" className="text-[13px] font-bold">新建 API</h3><p className="mt-1 text-[9px] text-[var(--muted)]">先创建草稿，再补充版本文档、鉴权与网关策略。</p></div><button type="button" onClick={closeDialog} aria-label="关闭"><X className="size-4 text-[var(--muted)]" /></button></div>
-      <div className="grid gap-4 p-5 sm:grid-cols-2">
-        <Field label="API 名称"><input required autoFocus value={form.name} onChange={(event) => updateForm("name", event.target.value)} placeholder="例如：企业工商信息查询" className="h-10 w-full border border-[var(--line)] px-3 text-[11px] outline-none focus:border-[var(--brand)]" /></Field>
-        <Field label="服务商"><input required value={form.provider} onChange={(event) => updateForm("provider", event.target.value)} placeholder="选择或输入服务商" className="h-10 w-full border border-[var(--line)] px-3 text-[11px] outline-none focus:border-[var(--brand)]" /></Field>
-        <Field label="请求方法"><select value={form.method} onChange={(event) => updateForm("method", event.target.value as ApiProduct["method"])} className="h-10 w-full border border-[var(--line)] bg-white px-3 text-[11px]"><option>GET</option><option>POST</option></select></Field>
-        <Field label="能力分类"><select value={form.category} onChange={(event) => updateForm("category", event.target.value as ApiForm["category"])} className="h-10 w-full border border-[var(--line)] bg-white px-3 text-[11px]">{categories.filter((category) => category !== "全部").map((category) => <option key={category}>{category}</option>)}</select></Field>
-        <div className="sm:col-span-2"><Field label="网关路径"><input required value={form.endpoint} onChange={(event) => updateForm("endpoint", event.target.value)} placeholder="/v1/service/action" className="mono h-10 w-full border border-[var(--line)] px-3 text-[11px] outline-none focus:border-[var(--brand)]" /></Field></div>
-        <Field label="计费方式"><select value={form.access} onChange={(event) => updateForm("access", event.target.value as ManagedApi["access"])} className="h-10 w-full border border-[var(--line)] bg-white px-3 text-[11px]"><option>免费</option><option>按量计费</option><option>套餐内</option></select></Field>
-        <Field label="调用单价">{form.access === "按量计费" ? <input required value={form.price} onChange={(event) => updateForm("price", event.target.value)} placeholder="¥0.03 / 次" className="h-10 w-full border border-[var(--line)] px-3 text-[11px] outline-none focus:border-[var(--brand)]" /> : <div className="flex h-10 items-center border border-[var(--line)] bg-[var(--surface-subtle)] px-3 text-[10px] text-[var(--muted)]">{form.access === "免费" ? "用户可在免费额度内调用" : "按用户订阅套餐核减配额"}</div>}</Field>
-      </div>
-      <div className="flex justify-end gap-2 border-t border-[var(--line)] px-5 py-4"><button type="button" onClick={closeDialog} className="h-9 rounded-[4px] border border-[var(--line)] px-4 text-[10px] font-semibold">取消</button><button type="submit" className="h-9 rounded-[4px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white">创建草稿</button></div>
-    </form></div>}
+    {dialogOpen && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4" onMouseDown={() => setDialogOpen(false)}><form onSubmit={createApi} onMouseDown={(event) => event.stopPropagation()} className="mx-auto my-6 w-full max-w-4xl rounded-[8px] bg-[var(--surface)] shadow-2xl"><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">新建 API</h3><p className="mt-1 text-[9px] text-[var(--muted)]">保存后生成草稿，不会自动发布。</p></div><button type="button" onClick={() => setDialogOpen(false)} aria-label="关闭"><X className="size-4" /></button></div>
+      <div className="space-y-6 p-5"><Section title="基本信息"><div className="grid gap-4 sm:grid-cols-2"><Field label="API 名称"><input name="name" required minLength={2} className={inputClass} /></Field><Field label="唯一标识"><input name="slug" required pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="company-verify" className={inputClass} /></Field><Field label="图标短名"><input name="shortName" required maxLength={4} placeholder="CV" className={inputClass} /></Field><Field label="能力分类"><select name="category" className={inputClass}>{apiCategories.map((item) => <option key={item}>{item}</option>)}</select></Field><Field label="服务商品牌"><input name="providerName" required className={inputClass} /></Field><Field label="服务商法定名称"><input name="providerLegalName" required className={inputClass} /></Field><Field label="服务商联系邮箱"><input name="providerEmail" required type="email" className={inputClass} /></Field><Field label="标识颜色"><input name="color" required type="color" defaultValue="#08785d" className={inputClass} /></Field><div className="sm:col-span-2"><Field label="接口说明"><textarea name="description" required minLength={10} rows={3} className="w-full rounded-[6px] border border-[var(--line)] bg-[var(--surface)] p-3 text-[11px] outline-none" /></Field></div><Field label="标签（英文逗号分隔）"><input name="tags" className={inputClass} /></Field><label className="flex items-end gap-2 pb-2 text-[10px]"><input name="featured" type="checkbox" />首页推荐</label></div></Section>
+      <Section title="端点与执行"><div className="mb-4 grid grid-cols-2 gap-2 rounded-[7px] bg-[var(--surface-subtle)] p-1"><button type="button" onClick={() => setExecutionMode("EXTERNAL")} className={`h-9 rounded-[6px] text-[10px] font-semibold ${executionMode === "EXTERNAL" ? "bg-[var(--surface)] shadow-sm" : "text-[var(--muted)]"}`}>外部接口转发</button><button type="button" onClick={() => setExecutionMode("INTERNAL")} className={`h-9 rounded-[6px] text-[10px] font-semibold ${executionMode === "INTERNAL" ? "bg-[var(--surface)] shadow-sm" : "text-[var(--muted)]"}`}>内置处理器</button></div><div className="grid gap-4 sm:grid-cols-3"><Field label="版本"><input name="version" required defaultValue="v1" className={inputClass} /></Field><Field label="请求方法"><select name="method" className={inputClass}><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select></Field><Field label="网关子路径"><input name="path" required defaultValue="/" className={inputClass} /></Field><div className="sm:col-span-3"><Field label="端点摘要"><input name="summary" required className={inputClass} /></Field></div>{executionMode === "INTERNAL" ? <div className="sm:col-span-3"><Field label="内置方案"><select name="internalHandler" className={inputClass}>{internalHandlerTemplates.map((item) => <option key={item.id} value={item.id}>{item.name} - {item.description}</option>)}</select></Field></div> : <><div className="sm:col-span-2"><Field label="上游基础地址"><input name="upstreamBaseUrl" required type="url" placeholder="https://provider.example.com/api/" className={inputClass} /></Field></div><Field label="鉴权方式"><select name="upstreamAuthType" value={authType} onChange={(event) => setAuthType(event.target.value)} className={inputClass}><option value="NONE">无</option><option value="BEARER">Bearer Token</option><option value="HEADER">自定义请求头</option></select></Field>{authType === "BEARER" && <div className="sm:col-span-3"><Field label="Bearer Token（加密保存）"><input name="upstreamToken" required type="password" autoComplete="off" className={inputClass} /></Field></div>}{authType === "HEADER" && <><Field label="请求头名称"><input name="upstreamHeaderName" required className={inputClass} /></Field><div className="sm:col-span-2"><Field label="请求头值（加密保存）"><input name="upstreamHeaderValue" required type="password" autoComplete="off" className={inputClass} /></Field></div></>}<label className="sm:col-span-3 flex items-center gap-2 text-[10px]"><input name="allowPrivateNetwork" type="checkbox" />允许访问内网地址（仅用于受控企业网络）</label></>}</div></Section>
+      <Section title="计量与服务等级"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="计费方式"><select value={billingMode} onChange={(event) => setBillingMode(event.target.value as typeof billingMode)} className={inputClass}><option value="FREE">免费</option><option value="PER_REQUEST">按成功请求计费</option></select></Field><Field label="单价（元/次）"><input name="unitPrice" type="number" min="0" step="0.000001" disabled={billingMode === "FREE"} className={inputClass} /></Field><Field label="每月免费次数"><input name="freeQuotaMonthly" required type="number" min="0" defaultValue="0" className={inputClass} /></Field><Field label="默认 QPS"><input name="defaultQpsLimit" required type="number" min="1" defaultValue="10" className={inputClass} /></Field><Field label="超时（毫秒）"><input name="timeoutMs" required type="number" min="500" max="60000" defaultValue="10000" className={inputClass} /></Field><Field label="承诺 SLA（%）"><input name="sla" required type="number" min="0" max="100" step="0.001" defaultValue="99.9" className={inputClass} /></Field></div></Section>{error && <p role="alert" className="rounded-[6px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}</div><div className="flex justify-end gap-2 border-t border-[var(--line)] px-5 py-4"><button type="button" onClick={() => setDialogOpen(false)} className="h-9 rounded-[6px] border border-[var(--line)] px-4 text-[10px]">取消</button><button disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-60">{saving && <Loader2 className="size-3.5 animate-spin" />}{saving ? "正在创建" : "创建草稿"}</button></div></form></div>}
   </div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block"><span className="mb-1.5 block text-[10px] font-semibold">{label}</span>{children}</label>;
-}
+function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section><h4 className="mb-3 border-b border-[var(--line)] pb-2 text-[11px] font-bold">{title}</h4>{children}</section>; }
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 block text-[10px] font-semibold">{label}</span>{children}</label>; }

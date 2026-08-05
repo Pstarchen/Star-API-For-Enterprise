@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/server/prisma";
 
 const SESSION_COOKIE = "star_api_session";
+const WORKSPACE_COOKIE = "star_api_workspace";
 const SESSION_HOURS = 12;
 const REMEMBERED_SESSION_DAYS = 30;
 
@@ -86,6 +87,16 @@ export async function requireAdmin() {
   const user = await requireUser("/login?next=/admin");
   if (user.platformRole !== "ADMIN") redirect("/console?error=forbidden");
   return user;
+}
+
+export async function getCurrentWorkspace(user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>) {
+  const selectedId = (await cookies()).get(WORKSPACE_COOKIE)?.value;
+  return user.memberships.find((membership) => membership.tenantId === selectedId) ?? user.memberships[0] ?? null;
+}
+
+export async function setCurrentWorkspace(tenantId: string) {
+  const cookieStore = await cookies();
+  cookieStore.set(WORKSPACE_COOKIE, tenantId, { httpOnly: true, secure: secureCookieEnabled(), sameSite: "lax", path: "/", maxAge: 365 * 24 * 60 * 60 });
 }
 
 export function hashAuthIdentifier(identifier: string) {

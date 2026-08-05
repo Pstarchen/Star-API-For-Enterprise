@@ -1,4 +1,12 @@
-import { CheckCircle2, MoreHorizontal } from "lucide-react";
-import { ResourceTablePage } from "@/components/resource-table-page";
-const hooks = [["订单状态通知", "https://api.xinghai.cn/hooks/order", "logistics.updated", "刚刚", "正常"], ["风控事件同步", "https://risk.xinghai.cn/events", "risk.triggered", "6 分钟前", "正常"], ["账单归档", "https://finance.xinghai.cn/starapi", "invoice.created", "8 月 3 日", "正常"]];
-export default function WebhooksPage() { return <ResourceTablePage eyebrow="EVENT DELIVERY" title="Webhook" description="订阅业务事件，配置签名密钥、重试策略与投递日志。" action="新建端点" columns={["名称", "回调地址", "订阅事件", "最近投递", "状态", "操作"]} rows={hooks.map((row) => [...row.slice(0, 4), <span key="status" className="inline-flex items-center gap-1 text-[var(--brand)]"><CheckCircle2 className="size-3" />{row[4]}</span>, <MoreHorizontal key="more" className="size-4 text-[var(--muted)]" />])} />; }
+import { connection } from "next/server";
+import { WebhooksManager, type WebhookView } from "@/components/webhooks-manager";
+import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
+import { prisma } from "@/lib/server/prisma";
+
+export default async function WebhooksPage() {
+  await connection();
+  const user = await getCurrentUser(); const workspace = user ? await getCurrentWorkspace(user) : null;
+  const apps = workspace ? await prisma.application.findMany({ where: { tenantId: workspace.tenantId }, include: { webhooks: true }, orderBy: { createdAt: "desc" } }) : [];
+  const initial: WebhookView[] = apps.flatMap((app) => app.webhooks.map((item) => ({ id: item.id, appId: app.id, appName: app.name, name: item.name, url: item.url, events: item.events, enabled: item.enabled, createdAt: item.createdAt.toISOString() })));
+  return <WebhooksManager initial={initial} apps={apps.map((app) => ({ id: app.id, name: app.name }))} />;
+}

@@ -1,4 +1,13 @@
-import { MoreHorizontal } from "lucide-react";
-import { ResourceTablePage } from "@/components/resource-table-page";
-const data = [["星海科技集团", "企业版", "86", "628.4 万", "¥ 12,684", "正常"], ["华东供应链有限公司", "专业版", "28", "186.2 万", "¥ 4,208", "正常"], ["明辰金融科技", "企业版", "142", "982.6 万", "¥ 28,640", "正常"], ["云港信息服务", "基础版", "12", "42.8 万", "¥ 986", "观察中"], ["远山电子商务", "专业版", "36", "215.4 万", "¥ 6,342", "正常"]];
-export default function TenantsPage() { return <ResourceTablePage eyebrow="TENANTS" title="企业租户" description="管理企业实名、套餐、成员规模、消费与风险状态。" action="创建租户" columns={["企业", "套餐", "成员", "本月调用", "本月消费", "状态", "操作"]} rows={data.map((row) => [...row, <MoreHorizontal key="more" className="size-4 text-[var(--muted)]" />])} />; }
+import { connection } from "next/server";
+import { AdminTenantsManager } from "@/components/admin-tenants-manager";
+import { prisma } from "@/lib/server/prisma";
+
+export default async function TenantsPage() {
+  await connection();
+  const [tenants, usage] = await Promise.all([
+    prisma.tenant.findMany({ include: { memberships: { select: { id: true } }, apps: { select: { id: true } } }, orderBy: { createdAt: "desc" } }),
+    prisma.requestLog.groupBy({ by: ["appId"], _count: { _all: true }, _sum: { amount: true } }),
+  ]);
+  const usageByApp = new Map(usage.map((item) => [item.appId, { calls: item._count._all, amount: Number(item._sum.amount ?? 0) }]));
+  return <AdminTenantsManager initialTenants={tenants.map((tenant) => { const totals = tenant.apps.reduce((sum, app) => { const item = usageByApp.get(app.id); return { calls: sum.calls + (item?.calls ?? 0), amount: sum.amount + (item?.amount ?? 0) }; }, { calls: 0, amount: 0 }); return { id: tenant.id, name: tenant.name, type: tenant.type, plan: tenant.plan, memberCount: tenant.memberships.length, appCount: tenant.apps.length, calls: totals.calls, amount: totals.amount.toFixed(6), status: tenant.status, createdAt: tenant.createdAt.toISOString() }; })} />;
+}

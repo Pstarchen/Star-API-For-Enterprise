@@ -30,6 +30,16 @@ enum ApiStatus {
   OFFLINE
 }
 
+enum ApiExecutionMode {
+  INTERNAL
+  EXTERNAL
+}
+
+enum BillingMode {
+  FREE
+  PER_REQUEST
+}
+
 enum AppEnvironment {
   TEST
   PRODUCTION
@@ -69,41 +79,85 @@ enum UserStatus {
   SUSPENDED
 }
 
+enum PaymentChannel {
+  ALIPAY
+  WECHAT
+  BANK_TRANSFER
+}
+
+enum PaymentOrderStatus {
+  PENDING
+  PAID
+  CANCELED
+  EXPIRED
+  REFUNDED
+}
+
 model Tenant {
-  id          String        @id @default(cuid())
-  name        String
-  type        AccountType   @default(ENTERPRISE)
-  creditCode  String?       @unique
-  status      TenantStatus  @default(PENDING)
-  plan        String        @default("basic")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-  memberships Membership[]
-  apps        Application[]
-  invoices    Invoice[]
-  auditLogs   AuditLog[]
+  id                String         @id @default(cuid())
+  name              String
+  type              AccountType    @default(ENTERPRISE)
+  creditCode        String?        @unique
+  status            TenantStatus   @default(PENDING)
+  plan              String         @default("basic")
+  notificationEmail String?
+  timezone          String         @default("Asia/Shanghai")
+  quotaAlerts       Boolean        @default(true)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  memberships       Membership[]
+  apps              Application[]
+  invoices          Invoice[]
+  payments          PaymentOrder[]
+  auditLogs         AuditLog[]
 
   @@index([status, createdAt])
 }
 
 model User {
-  id              String       @id @default(cuid())
-  email           String       @unique
+  id              String         @id @default(cuid())
+  email           String         @unique
   name            String
-  accountType     AccountType  @default(PERSONAL)
-  platformRole    PlatformRole @default(USER)
-  status          UserStatus   @default(ACTIVE)
+  accountType     AccountType    @default(PERSONAL)
+  platformRole    PlatformRole   @default(USER)
+  status          UserStatus     @default(ACTIVE)
   passwordHash    String?
   emailVerifiedAt DateTime?
-  mfaEnabled      Boolean      @default(false)
+  mfaEnabled      Boolean        @default(false)
   lastLoginAt     DateTime?
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   memberships     Membership[]
   sessions        Session[]
-  auditLogs       AuditLog[]   @relation("AuditActor")
+  oauthAccounts   OAuthAccount[]
+  auditLogs       AuditLog[]     @relation("AuditActor")
 
   @@index([platformRole, status])
+}
+
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  provider          String
+  providerAccountId String
+  username          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model OAuthState {
+  id           String   @id @default(cuid())
+  provider     String
+  tokenHash    String   @unique
+  redirectPath String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+
+  @@index([provider, expiresAt])
 }
 
 model Session {
@@ -144,6 +198,15 @@ model PlatformAsset {
   updatedAt DateTime @updatedAt
 }
 
+model IntegrationSetting {
+  key             String   @id
+  enabled         Boolean  @default(false)
+  publicConfig    Json     @default("{}")
+  secretEncrypted Bytes?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 model Membership {
   id        String     @id @default(cuid())
   tenantId  String
@@ -168,19 +231,35 @@ model Provider {
 }
 
 model ApiProduct {
-  id            String         @id @default(cuid())
-  providerId    String
-  slug          String         @unique
-  name          String
-  description   String
-  category      String
-  status        ApiStatus      @default(DRAFT)
-  sla           Decimal        @db.Decimal(6, 3)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  provider      Provider       @relation(fields: [providerId], references: [id])
-  versions      ApiVersion[]
-  subscriptions Subscription[]
+  id                    String           @id @default(cuid())
+  providerId            String
+  slug                  String           @unique
+  name                  String
+  shortName             String           @default("API")
+  description           String
+  category              String
+  color                 String           @default("#08785d")
+  tags                  String[]
+  featured              Boolean          @default(false)
+  status                ApiStatus        @default(DRAFT)
+  sla                   Decimal          @db.Decimal(6, 3)
+  executionMode         ApiExecutionMode @default(EXTERNAL)
+  internalHandler       String?
+  upstreamBaseUrl       String?
+  upstreamAuthType      String?
+  executionConfig       Json             @default("{}")
+  secretConfigEncrypted Bytes?
+  timeoutMs             Int              @default(10000)
+  billingMode           BillingMode      @default(FREE)
+  unitPrice             Decimal          @default(0) @db.Decimal(12, 6)
+  freeQuotaMonthly      BigInt           @default(0)
+  defaultQpsLimit       Int              @default(10)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  provider              Provider         @relation(fields: [providerId], references: [id])
+  versions              ApiVersion[]
+  subscriptions         Subscription[]
+  requestLogs           RequestLog[]
 
   @@index([status, category])
   @@index([providerId])
@@ -200,13 +279,14 @@ model ApiVersion {
 }
 
 model Endpoint {
-  id        String     @id @default(cuid())
-  versionId String
-  method    String
-  path      String
-  summary   String
-  schema    Json
-  version   ApiVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  id          String       @id @default(cuid())
+  versionId   String
+  method      String
+  path        String
+  summary     String
+  schema      Json
+  version     ApiVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  requestLogs RequestLog[]
 
   @@unique([versionId, method, path])
 }
@@ -228,17 +308,18 @@ model Application {
 }
 
 model ApiKey {
-  id         String      @id @default(cuid())
-  appId      String
-  name       String
-  prefix     String
-  secretHash String      @unique
-  scopes     String[]
-  status     KeyStatus   @default(ACTIVE)
-  expiresAt  DateTime?
-  lastUsedAt DateTime?
-  createdAt  DateTime    @default(now())
-  app        Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+  id          String       @id @default(cuid())
+  appId       String
+  name        String
+  prefix      String
+  secretHash  String       @unique
+  scopes      String[]
+  status      KeyStatus    @default(ACTIVE)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  app         Application  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  requestLogs RequestLog[]
 
   @@index([appId, status])
   @@index([prefix])
@@ -260,41 +341,80 @@ model Subscription {
 }
 
 model RequestLog {
-  id         String      @id
-  appId      String
-  endpointId String?
-  statusCode Int
-  latencyMs  Int
-  region     String
-  occurredAt DateTime    @default(now())
-  app        Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+  id            String      @id
+  appId         String
+  apiKeyId      String?
+  productId     String?
+  endpointId    String?
+  method        String      @default("GET")
+  path          String      @default("/")
+  statusCode    Int
+  latencyMs     Int
+  region        String
+  billableUnits BigInt      @default(0)
+  amount        Decimal     @default(0) @db.Decimal(14, 6)
+  responseBytes Int         @default(0)
+  errorCode     String?
+  billed        Boolean     @default(false)
+  occurredAt    DateTime    @default(now())
+  app           Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+  apiKey        ApiKey?     @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  product       ApiProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  endpoint      Endpoint?   @relation(fields: [endpointId], references: [id], onDelete: SetNull)
 
   @@index([appId, occurredAt(sort: Desc)])
+  @@index([productId, occurredAt(sort: Desc)])
+  @@index([apiKeyId, occurredAt(sort: Desc)])
   @@index([statusCode, occurredAt(sort: Desc)])
 }
 
+model PaymentOrder {
+  id              String             @id @default(cuid())
+  orderNo         String             @unique
+  tenantId        String
+  invoiceId       String?
+  channel         PaymentChannel
+  status          PaymentOrderStatus @default(PENDING)
+  amount          Decimal            @db.Decimal(14, 2)
+  subject         String
+  externalTradeNo String?
+  paymentUrl      String?
+  paidAt          DateTime?
+  expiresAt       DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  invoice         Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([invoiceId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+}
+
 model Invoice {
-  id       String        @id @default(cuid())
+  id       String         @id @default(cuid())
   tenantId String
   period   String
-  amount   Decimal       @db.Decimal(14, 2)
-  status   InvoiceStatus @default(DRAFT)
+  amount   Decimal        @db.Decimal(14, 2)
+  status   InvoiceStatus  @default(DRAFT)
   issuedAt DateTime?
-  tenant   Tenant        @relation(fields: [tenantId], references: [id])
+  tenant   Tenant         @relation(fields: [tenantId], references: [id])
+  payments PaymentOrder[]
 
   @@unique([tenantId, period])
 }
 
 model WebhookEndpoint {
-  id         String      @id @default(cuid())
-  appId      String
-  name       String
-  url        String
-  secretHash String
-  events     String[]
-  enabled    Boolean     @default(true)
-  createdAt  DateTime    @default(now())
-  app        Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+  id              String      @id @default(cuid())
+  appId           String
+  name            String
+  url             String
+  secretHash      String
+  secretEncrypted Bytes?
+  events          String[]
+  enabled         Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  app             Application @relation(fields: [appId], references: [id], onDelete: Cascade)
 
   @@index([appId, enabled])
 }

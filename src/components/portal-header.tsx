@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BookOpen, Boxes, ChevronDown, CreditCard, Home, LayoutDashboard, LogOut, Menu, Search, Settings, ShieldCheck, X } from "lucide-react";
+import { BookOpen, Boxes, ChevronDown, CreditCard, Home, LayoutDashboard, LogOut, Menu, Settings, ShieldCheck, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./brand-mark";
-import { StatusRail } from "./status-rail";
+import { StatusRail, type GatewayStatus } from "./status-rail";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./theme-toggle";
 
@@ -19,7 +19,7 @@ const links = [
 
 type PortalUser = { name: string; email: string; platformRole: "USER" | "ADMIN" };
 
-export function PortalHeader({ currentUser }: { currentUser: PortalUser | null }) {
+export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: PortalUser | null; gatewayStatus: GatewayStatus }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -58,7 +58,7 @@ export function PortalHeader({ currentUser }: { currentUser: PortalUser | null }
 
   return (
     <header className="sticky top-0 z-40">
-      <StatusRail />
+      <StatusRail status={gatewayStatus} />
       <div className="portal-glass">
         <div className="container-shell flex h-16 items-center gap-7">
           <BrandMark />
@@ -80,9 +80,6 @@ export function PortalHeader({ currentUser }: { currentUser: PortalUser | null }
             })}
           </nav>
           <div ref={accountRef} className="relative ml-auto hidden items-center gap-2 sm:flex">
-            <button className="grid size-9 place-items-center rounded-[5px] text-[var(--muted)] hover:bg-[var(--surface-subtle)]" aria-label="搜索">
-              <Search className="size-4" />
-            </button>
             <ThemeToggle className="grid size-9 place-items-center rounded-[5px] text-[var(--muted)] hover:bg-[var(--surface-subtle)]" />
             {currentUser ? <>
               <button type="button" onClick={() => setAccountOpen((value) => !value)} className="ml-1 flex h-10 max-w-48 items-center gap-2 rounded-[6px] border border-[var(--line)] bg-[var(--surface)] px-2.5 text-left hover:border-[var(--line-strong)]" aria-expanded={accountOpen} aria-haspopup="menu">

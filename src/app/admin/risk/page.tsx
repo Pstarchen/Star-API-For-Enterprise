@@ -1,4 +1,9 @@
-import { Ban, ShieldAlert } from "lucide-react";
+import { connection } from "next/server";
 import { ResourceTablePage } from "@/components/resource-table-page";
-const data = [["risk_8D72", "密钥高频轮询", "明辰金融科技", "高", "进行中", "2 分钟前"], ["risk_8D68", "异地突发流量", "云港信息服务", "中", "待复核", "18 分钟前"], ["risk_8D21", "连续鉴权失败", "远山电子商务", "低", "已拦截", "3 小时前"]];
-export default function RiskPage() { return <ResourceTablePage eyebrow="RISK CONTROL" title="风控中心" description="汇总网关异常行为、策略命中和人工复核任务。" action="创建风控策略" columns={["事件 ID", "事件类型", "企业租户", "风险等级", "处置状态", "发生时间", "操作"]} rows={data.map((row) => [<code key="id" className="mono">{row[0]}</code>, row[1], row[2], <span key="level" className={row[3] === "高" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{row[3]}</span>, row[4], row[5], row[4] === "已拦截" ? <Ban key="action" className="size-4 text-[var(--muted)]" /> : <ShieldAlert key="action" className="size-4 text-[var(--warning)]" />])} />; }
+import { prisma } from "@/lib/server/prisma";
+
+export default async function RiskPage() {
+  await connection();
+  const blocked = await prisma.authThrottle.findMany({ where: { blockedUntil: { gt: new Date() } }, orderBy: { blockedUntil: "desc" } });
+  return <ResourceTablePage eyebrow="RISK CONTROL" title="实时登录风控" description="展示登录节流器当前真实阻断记录；标识已哈希，无法反查邮箱或 IP。" columns={["风险标识哈希", "失败次数", "窗口开始", "阻断至", "更新时间"]} rows={blocked.map((item) => [<code key="key" className="mono">{item.key}</code>, item.attempts, item.windowStartedAt.toLocaleString("zh-CN"), item.blockedUntil?.toLocaleString("zh-CN") ?? "-", item.updatedAt.toLocaleString("zh-CN")])} emptyText="当前没有被阻断的登录标识" />;
+}

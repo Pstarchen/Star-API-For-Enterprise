@@ -1,17 +1,12 @@
-import { apiProducts } from "@/lib/data";
+import { listCatalogProducts } from "@/lib/server/catalog";
+import { noStoreHeaders } from "@/lib/server/request";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const query = searchParams.get("q")?.trim().toLowerCase();
-  const category = searchParams.get("category");
-  const method = searchParams.get("method");
-
-  const data = apiProducts.filter((api) => {
-    if (category && category !== "全部" && api.category !== category) return false;
-    if (method && api.method !== method.toUpperCase()) return false;
-    if (query && ![api.name, api.description, api.provider, ...api.tags].join(" ").toLowerCase().includes(query)) return false;
-    return true;
-  });
-
-  return Response.json({ data, meta: { total: data.length, requestId: crypto.randomUUID() } });
+  const search = new URL(request.url).searchParams;
+  const query = search.get("q")?.trim().toLowerCase();
+  const category = search.get("category");
+  const method = search.get("method")?.toUpperCase();
+  const products = await listCatalogProducts({ status: "PUBLISHED" });
+  const data = products.filter((api) => (!category || api.category === category) && (!method || api.method === method) && (!query || [api.name, api.description, api.provider, ...api.tags].join(" ").toLowerCase().includes(query)));
+  return Response.json({ data, meta: { total: data.length, requestId: crypto.randomUUID() } }, { headers: noStoreHeaders });
 }

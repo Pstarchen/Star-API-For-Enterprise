@@ -5,6 +5,7 @@ import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders } from "@/lib/server/request";
 
 const keySchema = z.object({ appId: z.string().min(3).max(64), name: z.string().min(2).max(40), environment: z.enum(["test", "live"]), scopes: z.array(z.string().min(1).max(80)).max(30).default([]) });
+const revokeSchema = z.object({ id: z.string().min(1) }).strict();
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -43,4 +44,19 @@ export async function POST(request: Request) {
   });
 
   return Response.json({ data: { id: record.id, appId: record.appId, name: record.name, prefix: record.prefix, secret: key.secret, scopes: record.scopes, createdAt: record.createdAt.toISOString() } }, { status: 201, headers: noStoreHeaders });
+}
+
+export async function PATCH(request: Request) {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ code: 401, message: "请先登录" }, { status: 401, headers: noStoreHeaders });
+  const parsed = revokeSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return Response.json({ code: 400, message: "密钥参数不正确" }, { status: 400, headers: noStoreHeaders });
+  const key = await prisma.apiKey.findFirst({ where: { id: parsed.data.id, app: { tenant: { memberships: { some: { userId: user.id } } } } }, include: { app: true } });
+  if (!key) return Response.json({ code: 404, message: "密钥不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
+  if (key.status !== "ACTIVE") return Response.json({ code: 409, message: "密钥已经失效" }, { status: 409, headers: noStoreHeaders });
+  await prisma.$transaction([
+    prisma.apiKey.update({ where: { id: key.id }, data: { status: "REVOKED" } }),
+    prisma.auditLog.create({ data: { tenantId: key.app.tenantId, actorId: user.id, action: "api-key.revoke", resource: "api-key", resourceId: key.id, metadata: { prefix: key.prefix } } }),
+  ]);
+  return Response.json({ code: 200, message: "密钥已撤销" }, { headers: noStoreHeaders });
 }

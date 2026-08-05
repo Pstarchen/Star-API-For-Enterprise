@@ -1,4 +1,9 @@
-import { CheckCircle2, Clock3, MoreHorizontal } from "lucide-react";
-import { ResourceTablePage } from "@/components/resource-table-page";
-const data = [["星枢数据", "企业数据", "18", "99.99%", "2024-03-18", "已认证"], ["国信认证", "身份核验", "12", "99.97%", "2024-06-02", "已认证"], ["明眸智能", "智能识别", "8", "99.95%", "2025-01-12", "已认证"], ["云讯通", "消息通信", "6", "99.98%", "2025-04-26", "复审中"], ["路由云", "生活服务", "4", "99.94%", "2026-07-30", "待审核"]];
-export default function ProvidersPage() { return <ResourceTablePage eyebrow="PROVIDER ONBOARDING" title="服务商准入" description="审核服务资质、数据来源、合规材料与履约质量。" action="邀请服务商" columns={["服务商", "能力领域", "服务数", "平均 SLA", "入驻日期", "认证状态", "操作"]} rows={data.map((row) => [...row.slice(0, 5), <span key="status" className={`inline-flex items-center gap-1 ${row[5] === "已认证" ? "text-[var(--brand)]" : "text-[var(--warning)]"}`}>{row[5] === "已认证" ? <CheckCircle2 className="size-3" /> : <Clock3 className="size-3" />}{row[5]}</span>, <MoreHorizontal key="more" className="size-4 text-[var(--muted)]" />])} />; }
+import { connection } from "next/server";
+import { AdminProvidersManager } from "@/components/admin-providers-manager";
+import { prisma } from "@/lib/server/prisma";
+
+export default async function ProvidersPage() {
+  await connection();
+  const providers = await prisma.provider.findMany({ include: { products: true }, orderBy: { createdAt: "desc" } });
+  return <AdminProvidersManager initialProviders={providers.map((provider) => ({ id: provider.id, name: provider.name, legalName: provider.legalName, contactEmail: provider.contactEmail, productCount: provider.products.length, categories: Array.from(new Set(provider.products.map((item) => item.category))), averageSla: provider.products.length ? (provider.products.reduce((sum, item) => sum + Number(item.sla), 0) / provider.products.length).toFixed(3) : null, verifiedAt: provider.verifiedAt?.toISOString() ?? null, createdAt: provider.createdAt.toISOString() }))} />;
+}
