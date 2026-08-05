@@ -1,0 +1,255 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  DEVELOPER
+  FINANCE
+  AUDITOR
+}
+
+enum ApiStatus {
+  DRAFT
+  REVIEW
+  PUBLISHED
+  DEPRECATED
+  OFFLINE
+}
+
+enum AppEnvironment {
+  TEST
+  PRODUCTION
+}
+
+enum KeyStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  VOID
+}
+
+model Tenant {
+  id          String       @id @default(cuid())
+  name        String
+  creditCode  String?      @unique
+  status      TenantStatus @default(PENDING)
+  plan        String       @default("basic")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+  apps        Application[]
+  invoices    Invoice[]
+  auditLogs   AuditLog[]
+
+  @@index([status, createdAt])
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String
+  passwordHash  String?
+  mfaEnabled    Boolean      @default(false)
+  lastLoginAt   DateTime?
+  createdAt     DateTime     @default(now())
+  memberships   Membership[]
+  auditLogs     AuditLog[]   @relation("AuditActor")
+}
+
+model Membership {
+  id        String     @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      MemberRole
+  createdAt DateTime   @default(now())
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId])
+  @@index([userId])
+}
+
+model Provider {
+  id          String       @id @default(cuid())
+  name        String
+  legalName   String
+  verifiedAt  DateTime?
+  contactEmail String
+  createdAt   DateTime     @default(now())
+  products    ApiProduct[]
+}
+
+model ApiProduct {
+  id          String       @id @default(cuid())
+  providerId  String
+  slug        String       @unique
+  name        String
+  description String
+  category    String
+  status      ApiStatus    @default(DRAFT)
+  sla         Decimal      @db.Decimal(6, 3)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  provider    Provider     @relation(fields: [providerId], references: [id])
+  versions    ApiVersion[]
+  subscriptions Subscription[]
+
+  @@index([status, category])
+  @@index([providerId])
+}
+
+model ApiVersion {
+  id          String      @id @default(cuid())
+  productId   String
+  version     String
+  basePath    String
+  changelog   String?
+  publishedAt DateTime?
+  product     ApiProduct  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  endpoints   Endpoint[]
+
+  @@unique([productId, version])
+}
+
+model Endpoint {
+  id        String      @id @default(cuid())
+  versionId String
+  method    String
+  path      String
+  summary   String
+  schema    Json
+  version   ApiVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, method, path])
+}
+
+model Application {
+  id           String          @id @default(cuid())
+  tenantId     String
+  name         String
+  environment  AppEnvironment
+  status       String          @default("active")
+  createdAt    DateTime        @default(now())
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  apiKeys      ApiKey[]
+  subscriptions Subscription[]
+  requestLogs  RequestLog[]
+  webhooks     WebhookEndpoint[]
+
+  @@index([tenantId, environment])
+}
+
+model ApiKey {
+  id          String     @id @default(cuid())
+  appId       String
+  name        String
+  prefix      String
+  secretHash  String     @unique
+  scopes      String[]
+  status      KeyStatus  @default(ACTIVE)
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  createdAt   DateTime   @default(now())
+  app         Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, status])
+  @@index([prefix])
+}
+
+model Subscription {
+  id          String             @id @default(cuid())
+  appId       String
+  productId   String
+  status      SubscriptionStatus @default(ACTIVE)
+  quotaMonthly BigInt
+  qpsLimit    Int
+  unitPrice   Decimal            @db.Decimal(12, 6)
+  createdAt   DateTime           @default(now())
+  app         Application        @relation(fields: [appId], references: [id], onDelete: Cascade)
+  product     ApiProduct         @relation(fields: [productId], references: [id])
+
+  @@unique([appId, productId])
+}
+
+model RequestLog {
+  id          String      @id
+  appId       String
+  endpointId  String?
+  statusCode  Int
+  latencyMs   Int
+  region      String
+  occurredAt  DateTime    @default(now())
+  app         Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, occurredAt(sort: Desc)])
+  @@index([statusCode, occurredAt(sort: Desc)])
+}
+
+model Invoice {
+  id        String        @id @default(cuid())
+  tenantId  String
+  period    String
+  amount    Decimal       @db.Decimal(14, 2)
+  status    InvoiceStatus @default(DRAFT)
+  issuedAt  DateTime?
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, period])
+}
+
+model WebhookEndpoint {
+  id          String      @id @default(cuid())
+  appId       String
+  name        String
+  url         String
+  secretHash  String
+  events      String[]
+  enabled     Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  app         Application @relation(fields: [appId], references: [id], onDelete: Cascade)
+
+  @@index([appId, enabled])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  actorId     String?
+  action      String
+  resource    String
+  resourceId  String?
+  metadata    Json?
+  ipAddress   String?
+  occurredAt  DateTime @default(now())
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  actor       User?    @relation("AuditActor", fields: [actorId], references: [id])
+
+  @@index([tenantId, occurredAt(sort: Desc)])
+  @@index([actorId, occurredAt(sort: Desc)])
+}

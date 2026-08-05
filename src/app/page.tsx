@@ -1,69 +1,79 @@
-import Image from "next/image";
+import Link from "next/link";
+import { ArrowRight, CheckCircle2, CircleGauge, Code2, Network, ShieldCheck } from "lucide-react";
+import { ApiMarketplace } from "@/components/api-marketplace";
+import { PortalShell } from "@/components/portal-shell";
+
+const metrics = [
+  { value: "12.8 亿", label: "本月稳定调用", detail: "+18.6%", icon: Network },
+  { value: "99.99%", label: "平台整体可用性", detail: "过去 90 天", icon: ShieldCheck },
+  { value: "48 ms", label: "边缘节点 P50", detail: "国内 12 节点", icon: CircleGauge },
+  { value: "86 个", label: "已认证服务商", detail: "全流程准入", icon: CheckCircle2 },
+];
 
 export default function Home() {
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <PortalShell>
+      <section className="border-b border-[var(--line)] bg-white">
+        <div className="container-shell grid min-h-[330px] items-stretch lg:grid-cols-[1.15fr_.85fr]">
+          <div className="flex flex-col justify-center py-12 pr-0 lg:border-r lg:border-[var(--line)] lg:pr-14">
+            <div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--brand)]">
+              <span className="size-1.5 rounded-full bg-[var(--brand)]" />
+              企业公共 API 分发与治理平台
+            </div>
+            <h1 className="text-balance mt-5 max-w-2xl text-[36px] font-bold leading-[1.2] text-[var(--ink)] sm:text-[44px]">
+              把外部 API，变成企业内部的<span className="text-[var(--brand)]">稳定能力</span>
+            </h1>
+            <p className="mt-5 max-w-xl text-[15px] leading-7 text-[var(--muted)]">
+              从能力发现、在线调试到密钥、配额、账单与审计，用一个平台完成采购、接入和持续治理。
+            </p>
+            <div className="mt-7 flex flex-wrap items-center gap-3">
+              <a href="#market-heading" className="inline-flex h-10 items-center gap-2 rounded-[5px] bg-[var(--brand)] px-4 text-[12px] font-semibold text-white hover:bg-[var(--brand-strong)]">浏览接口 <ArrowRight className="size-3.5" /></a>
+              <Link href="/console" className="inline-flex h-10 items-center gap-2 rounded-[5px] border border-[var(--line-strong)] bg-white px-4 text-[12px] font-semibold hover:bg-[var(--surface-subtle)]"><Code2 className="size-3.5" /> 打开调试台</Link>
+            </div>
+          </div>
+
+          <div className="hidden p-8 lg:flex lg:flex-col lg:justify-center">
+            <div className="border border-[var(--line)] bg-[var(--canvas)] p-4 shadow-sm">
+              <div className="flex items-center justify-between border-b border-[var(--line)] pb-3">
+                <span className="mono text-[10px] text-[var(--muted)]">LIVE REQUEST / CN-EAST-1</span>
+                <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold text-[var(--brand)]"><span className="size-1.5 rounded-full bg-[var(--brand)]" /> 200 OK</span>
+              </div>
+              <div className="mono mt-4 space-y-2 text-[11px] leading-5">
+                <p><span className="font-bold text-[var(--brand)]">POST</span> <span className="text-[var(--ink)]">/v1/enterprise/verify</span></p>
+                <p className="text-[var(--muted)]">x-request-id: req_91DSK24D</p>
+                <div className="mt-3 border-l-2 border-[var(--brand)] bg-white p-3 text-[var(--muted)]">
+                  <p>{`{`}</p><p className="pl-4">&quot;status&quot;: &quot;active&quot;,</p><p className="pl-4">&quot;creditCode&quot;: &quot;9131••••••2X&quot;</p><p>{`}`}</p>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-3 gap-px overflow-hidden border border-[var(--line)] bg-[var(--line)] text-center">
+                <div className="bg-white py-3"><strong className="block text-sm">82ms</strong><span className="text-[9px] text-[var(--muted)]">LATENCY</span></div>
+                <div className="bg-white py-3"><strong className="block text-sm">上海</strong><span className="text-[9px] text-[var(--muted)]">NODE</span></div>
+                <div className="bg-white py-3"><strong className="block text-sm">TLS 1.3</strong><span className="text-[9px] text-[var(--muted)]">SECURITY</span></div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <section className="border-b border-[var(--line)] bg-[var(--surface-subtle)]">
+        <div className="container-shell grid grid-cols-2 divide-x divide-y divide-[var(--line)] sm:grid-cols-4 sm:divide-y-0">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="flex min-h-28 items-center gap-3 px-3 py-5 sm:px-5">
+              <metric.icon className="hidden size-5 text-[var(--brand)] xl:block" />
+              <div><strong className="block text-xl font-bold">{metric.value}</strong><span className="mt-1 block text-[11px] text-[var(--muted)]">{metric.label}</span><span className="mt-0.5 block text-[9px] text-[var(--brand)]">{metric.detail}</span></div>
+            </div>
+          ))}
         </div>
-      </main>
-    </div>
+      </section>
+
+      <ApiMarketplace />
+
+      <footer className="border-t border-[var(--line)] bg-white py-8">
+        <div className="container-shell flex flex-col gap-3 text-[11px] text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between">
+          <span>© 2026 星枢 API · 企业接口服务平台</span>
+          <div className="flex gap-5"><Link href="/docs">接入文档</Link><Link href="/console">服务状态</Link><Link href="/admin">平台管理</Link></div>
+        </div>
+      </footer>
+    </PortalShell>
   );
 }

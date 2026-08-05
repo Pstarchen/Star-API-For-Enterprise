@@ -1,0 +1,4 @@
+import { Ban, ShieldAlert } from "lucide-react";
+import { ResourceTablePage } from "@/components/resource-table-page";
+const data = [["risk_8D72", "密钥高频轮询", "明辰金融科技", "高", "进行中", "2 分钟前"], ["risk_8D68", "异地突发流量", "云港信息服务", "中", "待复核", "18 分钟前"], ["risk_8D21", "连续鉴权失败", "远山电子商务", "低", "已拦截", "3 小时前"]];
+export default function RiskPage() { return <ResourceTablePage eyebrow="RISK CONTROL" title="风控中心" description="汇总网关异常行为、策略命中和人工复核任务。" action="创建风控策略" columns={["事件 ID", "事件类型", "企业租户", "风险等级", "处置状态", "发生时间", "操作"]} rows={data.map((row) => [<code key="id" className="mono">{row[0]}</code>, row[1], row[2], <span key="level" className={row[3] === "高" ? "text-[var(--danger)]" : "text-[var(--warning)]"}>{row[3]}</span>, row[4], row[5], row[4] === "已拦截" ? <Ban key="action" className="size-4 text-[var(--muted)]" /> : <ShieldAlert key="action" className="size-4 text-[var(--warning)]" />])} />; }
