@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (!parsed.success) return Response.json({ code: 400, message: "Webhook 配置不完整" }, { status: 400, headers: noStoreHeaders });
   const app = await prisma.application.findFirst({ where: { id: parsed.data.appId, tenantId: workspace.tenantId } });
   if (!app) return Response.json({ code: 404, message: "应用不存在或不属于当前工作区" }, { status: 404, headers: noStoreHeaders });
-  try { await assertSafeUpstream(parsed.data.url); }
+  try { await assertSafeUpstream(parsed.data.url, "PUBLIC_API"); }
   catch { return Response.json({ code: 400, message: "Webhook 地址必须是可解析的公网 HTTP(S) 地址" }, { status: 400, headers: noStoreHeaders }); }
   const secret = `whsec_${randomBytes(24).toString("base64url")}`;
   const endpoint = await prisma.$transaction(async (transaction) => {

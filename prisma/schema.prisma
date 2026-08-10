@@ -25,14 +25,49 @@ enum MemberRole {
 enum ApiStatus {
   DRAFT
   REVIEW
+  GRAY
   PUBLISHED
   DEPRECATED
   OFFLINE
 }
 
-enum ApiExecutionMode {
+enum ApiVisibility {
+  PUBLIC
+  PRIVATE
+  GRAY
   INTERNAL
-  EXTERNAL
+}
+
+enum ApiUpstreamType {
+  PUBLIC_API
+  SERVER_LOCAL
+  TUNNEL
+  CONTENT
+  PHP_PACKAGE
+  BUILTIN
+}
+
+enum ApiRewriteMode {
+  PASSTHROUGH
+  PREFIX
+}
+
+enum ApiHealthStatus {
+  UNKNOWN
+  HEALTHY
+  UNHEALTHY
+}
+
+enum ApiParameterLocation {
+  PATH
+  QUERY
+  BODY
+}
+
+enum ApiAuditDecision {
+  SUBMITTED
+  APPROVED
+  REJECTED
 }
 
 enum BillingMode {
@@ -94,22 +129,24 @@ enum PaymentOrderStatus {
 }
 
 model Tenant {
-  id                String         @id @default(cuid())
+  id                String           @id @default(cuid())
   name              String
-  type              AccountType    @default(ENTERPRISE)
-  creditCode        String?        @unique
-  status            TenantStatus   @default(PENDING)
-  plan              String         @default("basic")
+  type              AccountType      @default(ENTERPRISE)
+  creditCode        String?          @unique
+  status            TenantStatus     @default(PENDING)
+  plan              String           @default("basic")
   notificationEmail String?
-  timezone          String         @default("Asia/Shanghai")
-  quotaAlerts       Boolean        @default(true)
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+  timezone          String           @default("Asia/Shanghai")
+  quotaAlerts       Boolean          @default(true)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
   memberships       Membership[]
   apps              Application[]
   invoices          Invoice[]
   payments          PaymentOrder[]
   auditLogs         AuditLog[]
+  providers         Provider[]
+  apiAccessGrants   ApiAccessGrant[]
 
   @@index([status, createdAt])
 }
@@ -131,6 +168,7 @@ model User {
   sessions        Session[]
   oauthAccounts   OAuthAccount[]
   auditLogs       AuditLog[]     @relation("AuditActor")
+  apiAudits       ApiAudit[]     @relation("ApiAuditReviewer")
 
   @@index([platformRole, status])
 }
@@ -221,48 +259,66 @@ model Membership {
 }
 
 model Provider {
-  id           String       @id @default(cuid())
-  name         String
-  legalName    String
-  verifiedAt   DateTime?
-  contactEmail String
-  createdAt    DateTime     @default(now())
-  products     ApiProduct[]
+  id            String       @id @default(cuid())
+  ownerTenantId String?
+  name          String
+  legalName     String
+  verifiedAt    DateTime?
+  contactEmail  String
+  createdAt     DateTime     @default(now())
+  ownerTenant   Tenant?      @relation(fields: [ownerTenantId], references: [id], onDelete: SetNull)
+  products      ApiProduct[]
+
+  @@index([ownerTenantId])
 }
 
 model ApiProduct {
-  id                    String           @id @default(cuid())
-  providerId            String
-  slug                  String           @unique
-  name                  String
-  shortName             String           @default("API")
-  description           String
-  category              String
-  color                 String           @default("#08785d")
-  tags                  String[]
-  featured              Boolean          @default(false)
-  status                ApiStatus        @default(DRAFT)
-  sla                   Decimal          @db.Decimal(6, 3)
-  executionMode         ApiExecutionMode @default(EXTERNAL)
-  internalHandler       String?
-  upstreamBaseUrl       String?
-  upstreamAuthType      String?
-  executionConfig       Json             @default("{}")
-  secretConfigEncrypted Bytes?
-  timeoutMs             Int              @default(10000)
-  billingMode           BillingMode      @default(FREE)
-  unitPrice             Decimal          @default(0) @db.Decimal(12, 6)
-  freeQuotaMonthly      BigInt           @default(0)
-  defaultQpsLimit       Int              @default(10)
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-  provider              Provider         @relation(fields: [providerId], references: [id])
-  versions              ApiVersion[]
-  subscriptions         Subscription[]
-  requestLogs           RequestLog[]
+  id               String           @id @default(cuid())
+  providerId       String
+  slug             String           @unique
+  name             String
+  shortName        String           @default("API")
+  description      String
+  category         String
+  color            String           @default("#08785d")
+  tags             String[]
+  featured         Boolean          @default(false)
+  status           ApiStatus        @default(DRAFT)
+  visibility       ApiVisibility    @default(PUBLIC)
+  sla              Decimal          @db.Decimal(6, 3)
+  internalHandler  String?
+  executionConfig  Json             @default("{}")
+  billingMode      BillingMode      @default(FREE)
+  unitPrice        Decimal          @default(0) @db.Decimal(12, 6)
+  freeQuotaMonthly BigInt           @default(0)
+  defaultQpsLimit  Int              @default(10)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  provider         Provider         @relation(fields: [providerId], references: [id])
+  upstream         ApiUpstream?
+  versions         ApiVersion[]
+  assets           ApiAsset[]
+  audits           ApiAudit[]
+  accessGrants     ApiAccessGrant[]
+  subscriptions    Subscription[]
+  requestLogs      RequestLog[]
 
   @@index([status, category])
   @@index([providerId])
+}
+
+model ApiAsset {
+  id        String     @id @default(cuid())
+  productId String
+  kind      String
+  name      String
+  mimeType  String
+  data      Bytes
+  size      Int
+  createdAt DateTime   @default(now())
+  product   ApiProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, kind, createdAt])
 }
 
 model ApiVersion {
@@ -279,16 +335,133 @@ model ApiVersion {
 }
 
 model Endpoint {
-  id          String       @id @default(cuid())
-  versionId   String
-  method      String
-  path        String
-  summary     String
-  schema      Json
-  version     ApiVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  requestLogs RequestLog[]
+  id             String            @id @default(cuid())
+  versionId      String
+  method         String
+  path           String
+  publicHost     String
+  publicPath     String
+  routeVersion   String
+  requestFormat  String            @default("JSON")
+  summary        String
+  schema         Json
+  corsEnabled    Boolean           @default(false)
+  forceHttps     Boolean           @default(true)
+  ipAllowlist    String[]
+  ipDenylist     String[]
+  dailyLimit     BigInt            @default(0)
+  requestLogging Boolean           @default(true)
+  version        ApiVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  requestLogs    RequestLog[]
+  parameters     ApiParameter[]
+  responseRules  ApiResponseRule[]
+  testCases      ApiTestCase[]
 
   @@unique([versionId, method, path])
+  @@unique([publicHost, publicPath, routeVersion, method])
+  @@index([publicHost, publicPath])
+}
+
+model ApiUpstream {
+  id                    String            @id @default(cuid())
+  productId             String            @unique
+  type                  ApiUpstreamType
+  rewriteMode           ApiRewriteMode    @default(PASSTHROUGH)
+  upstreamPrefix        String            @default("")
+  healthPath            String            @default("/health")
+  healthStatus          ApiHealthStatus   @default(UNKNOWN)
+  timeoutMs             Int               @default(10000)
+  offlineOnFailure      Boolean           @default(true)
+  authType              String            @default("NONE")
+  secretConfigEncrypted Bytes?
+  allowPrivateNetwork   Boolean           @default(false)
+  lastHealthCheckAt     DateTime?
+  lastHealthError       String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  product               ApiProduct        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  nodes                 ApiUpstreamNode[]
+}
+
+model ApiUpstreamNode {
+  id            String          @id @default(cuid())
+  upstreamId    String
+  name          String
+  baseUrl       String
+  weight        Int             @default(100)
+  enabled       Boolean         @default(true)
+  healthStatus  ApiHealthStatus @default(UNKNOWN)
+  failureCount  Int             @default(0)
+  lastCheckedAt DateTime?
+  lastError     String?
+  upstream      ApiUpstream     @relation(fields: [upstreamId], references: [id], onDelete: Cascade)
+
+  @@unique([upstreamId, baseUrl])
+  @@index([upstreamId, enabled, healthStatus])
+}
+
+model ApiParameter {
+  id           String               @id @default(cuid())
+  endpointId   String
+  location     ApiParameterLocation
+  name         String
+  upstreamName String?
+  required     Boolean              @default(false)
+  dataType     String               @default("string")
+  validation   Json                 @default("{}")
+  sensitive    Boolean              @default(false)
+  endpoint     Endpoint             @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, location, name])
+}
+
+model ApiResponseRule {
+  id           String   @id @default(cuid())
+  endpointId   String
+  statusCode   Int
+  gatewayCode  String?
+  template     Json?
+  maskedFields String[]
+  endpoint     Endpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, statusCode])
+}
+
+model ApiAccessGrant {
+  id        String     @id @default(cuid())
+  productId String
+  tenantId  String
+  createdAt DateTime   @default(now())
+  product   ApiProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, tenantId])
+}
+
+model ApiAudit {
+  id         String           @id @default(cuid())
+  productId  String
+  reviewerId String?
+  decision   ApiAuditDecision
+  note       String?
+  createdAt  DateTime         @default(now())
+  product    ApiProduct       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  reviewer   User?            @relation("ApiAuditReviewer", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt(sort: Desc)])
+}
+
+model ApiTestCase {
+  id         String   @id @default(cuid())
+  endpointId String
+  name       String
+  request    Json
+  expected   Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  endpoint   Endpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([endpointId, updatedAt(sort: Desc)])
 }
 
 model Application {

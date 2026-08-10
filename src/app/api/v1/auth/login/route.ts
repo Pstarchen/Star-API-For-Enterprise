@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from "@/lib/server/password";
 import { isInstalled } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { getAuthPolicy } from "@/lib/server/auth-policy";
 
 const loginSchema = z.object({
   email: z.email().transform((value) => value.trim().toLowerCase()),
@@ -15,6 +16,9 @@ const loginSchema = z.object({
 export async function POST(request: Request) {
   if (!(await isInstalled())) {
     return Response.json({ code: 503, message: "平台尚未完成初始化", data: { next: "/install" } }, { status: 503, headers: noStoreHeaders });
+  }
+  if (!(await getAuthPolicy()).passwordLoginEnabled) {
+    return Response.json({ code: 403, message: "邮箱密码登录当前已关闭，请使用平台提供的其他登录方式" }, { status: 403, headers: noStoreHeaders });
   }
   const parsed = loginSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {

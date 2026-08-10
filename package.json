@@ -9,6 +9,7 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio"
@@ -16,6 +17,7 @@
   "dependencies": {
     "@prisma/client": "^6.19.3",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.28.0",
     "next": "16.3.0",
     "nodemailer": "^9.0.4",
@@ -25,6 +27,7 @@
     "recharts": "^3.10.1",
     "redis": "^6.2.0",
     "tailwind-merge": "^3.6.0",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

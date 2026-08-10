@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 import { getIntegration, integrationKeys, integrationSummaries, saveIntegration } from "@/lib/server/integrations";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { getAuthPolicy } from "@/lib/server/auth-policy";
 
 const schema = z.object({
   key: z.enum(integrationKeys),
@@ -31,6 +32,9 @@ export async function PATCH(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ code: 400, message: "集成配置格式不正确", details: z.flattenError(parsed.error) }, { status: 400, headers: noStoreHeaders });
   const input = parsed.data;
+  if (input.key === "github" && !input.enabled && !(await getAuthPolicy()).passwordLoginEnabled) {
+    return Response.json({ code: 409, message: "邮箱密码登录已关闭，不能停用当前唯一的管理员登录方式" }, { status: 409, headers: noStoreHeaders });
+  }
   const previous = await getIntegration(input.key);
   const hasReplacement = input.secretAction === "replace" && Boolean(input.secrets && Object.values(input.secrets).some(Boolean));
   const configured = input.key === "bank-transfer" || (input.secretAction === "keep" ? previous.configured : hasReplacement);

@@ -5,6 +5,7 @@ import { getIntegration } from "@/lib/server/integrations";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
 import { requestIp } from "@/lib/server/request";
+import { getAuthPolicy } from "@/lib/server/auth-policy";
 
 type GitHubProfile = { id: number; login: string; name: string | null };
 type GitHubEmail = { email: string; primary: boolean; verified: boolean };
@@ -40,6 +41,7 @@ export async function GET(request: Request) {
     const email = emails.find((item) => item.primary && item.verified)?.email ?? emails.find((item) => item.verified)?.email;
     if (!email) return loginError(request, "github_verified_email_required");
     const normalizedEmail = email.toLowerCase();
+    const authPolicy = await getAuthPolicy();
 
     const user = await prisma.$transaction(async (transaction) => {
       const linked = await transaction.oAuthAccount.findUnique({ where: { provider_providerAccountId: { provider: "github", providerAccountId: String(profile.id) } }, include: { user: true } });
@@ -51,6 +53,7 @@ export async function GET(request: Request) {
       let target = await transaction.user.findUnique({ where: { email: normalizedEmail } });
       if (target?.status === "SUSPENDED") throw new Error("ACCOUNT_SUSPENDED");
       if (!target) {
+        if (!authPolicy.registrationEnabled) throw new Error("REGISTRATION_DISABLED");
         target = await transaction.user.create({ data: { email: normalizedEmail, name: profile.name?.trim() || profile.login, accountType: "PERSONAL", emailVerifiedAt: new Date(), lastLoginAt: new Date() } });
         const tenant = await transaction.tenant.create({ data: { name: `${target.name}的个人空间`, type: "PERSONAL", status: "ACTIVE" } });
         await transaction.membership.create({ data: { userId: target.id, tenantId: tenant.id, role: "OWNER" } });
@@ -63,6 +66,7 @@ export async function GET(request: Request) {
     return Response.redirect(new URL(user.platformRole === "ADMIN" && stateRecord.redirectPath === "/console" ? "/admin" : stateRecord.redirectPath, platform.publicUrl));
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_SUSPENDED") return loginError(request, "account_suspended");
+    if (error instanceof Error && error.message === "REGISTRATION_DISABLED") return loginError(request, "registration_disabled");
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return loginError(request, "github_account_conflict");
     return loginError(request, "github_login_failed");
   }

@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   const secret = decryptJson(endpoint.secretEncrypted).secret;
   if (typeof secret !== "string") return Response.json({ code: 409, message: "Webhook 缺少可用签名密钥，请重新创建" }, { status: 409, headers: noStoreHeaders });
   try {
-    await assertSafeUpstream(endpoint.url);
+    await assertSafeUpstream(endpoint.url, "PUBLIC_API");
     const payload = JSON.stringify({ event: "webhook.test", endpointId: endpoint.id, occurredAt: new Date().toISOString() });
     const signature = createHmac("sha256", secret).update(payload).digest("hex");
     const response = await fetch(endpoint.url, { method: "POST", headers: { "Content-Type": "application/json", "X-Star-Event": "webhook.test", "X-Star-Signature": `sha256=${signature}` }, body: payload, redirect: "error", signal: AbortSignal.timeout(10000), cache: "no-store" });

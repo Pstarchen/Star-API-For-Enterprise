@@ -6,3 +6,15 @@ export const internalHandlerTemplates = [
 ] as const;
 
 export type InternalHandlerId = (typeof internalHandlerTemplates)[number]["id"];
+
+export const contentHandlerIds = ["content.random-image", "content.random-text", "content.static-json"] as const;
+export type ContentHandlerId = (typeof contentHandlerIds)[number];
+export const phpHandlerId = "runtime.php" as const;
+
+export function isContentHandler(value: string | null | undefined): value is ContentHandlerId {
+  return contentHandlerIds.includes(value as ContentHandlerId);
+}
+
+export function isAssetBackedHandler(value: string | null | undefined) {
+  return isContentHandler(value) || value === phpHandlerId;
+}

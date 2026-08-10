@@ -9,6 +9,7 @@ export type CatalogProduct = {
   description: string;
   method: string;
   endpoint: string;
+  publicHost: string;
   latency: number | null;
   uptime: number | null;
   calls: number;
@@ -24,8 +25,11 @@ export type CatalogProduct = {
   billingMode: "FREE" | "PER_REQUEST";
   unitPrice: string;
   freeQuotaMonthly: string;
-  status: "DRAFT" | "REVIEW" | "PUBLISHED" | "DEPRECATED" | "OFFLINE";
-  executionMode: "INTERNAL" | "EXTERNAL";
+  status: "DRAFT" | "REVIEW" | "GRAY" | "PUBLISHED" | "DEPRECATED" | "OFFLINE";
+  visibility: "PUBLIC" | "PRIVATE" | "GRAY" | "INTERNAL";
+  upstreamType: "PUBLIC_API" | "SERVER_LOCAL" | "TUNNEL" | "CONTENT" | "PHP_PACKAGE" | "BUILTIN";
+  internalHandler: string | null;
+  assetCount: number;
   updatedAt: string;
   schema: unknown;
 };

@@ -15,5 +15,7 @@ const nav: WorkspaceNavItem[] = [
 export default async function ConsoleLayout({ children }: LayoutProps<"/console">) {
   await connection();
   const user = await requireUser();
-  return <WorkspaceShell nav={nav} title="开发者控制台" currentUser={{ name: user.name, email: user.email, workspaces: user.memberships.map((membership) => ({ id: membership.tenant.id, name: membership.tenant.name, type: membership.tenant.type, status: membership.tenant.status, role: membership.role })) }}>{children}</WorkspaceShell>;
+  const userNav = [...nav];
+  if (user.memberships.some((membership) => membership.tenant.type === "ENTERPRISE" && ["OWNER", "ADMIN"].includes(membership.role))) userNav.splice(2, 0, { href: "/console/provider/apis", label: "服务商 API", icon: "boxes" });
+  return <WorkspaceShell nav={userNav} title="开发者控制台" currentUser={{ name: user.name, email: user.email, workspaces: user.memberships.map((membership) => ({ id: membership.tenant.id, name: membership.tenant.name, type: membership.tenant.type, status: membership.tenant.status, role: membership.role })) }}>{children}</WorkspaceShell>;
 }

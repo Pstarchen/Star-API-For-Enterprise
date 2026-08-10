@@ -7,3 +7,17 @@
     Strict-Transport-Security "max-age=31536000; includeSubDomains" defer
   }
 }
+
+{$API_SITE_ADDRESS} {
+  encode zstd gzip
+
+  handle {
+    rewrite * /api/v1/public{uri}
+    reverse_proxy app:3000
+  }
+
+  header {
+    -Server
+    Strict-Transport-Security "max-age=31536000; includeSubDomains" defer
+  }
+}

@@ -7,6 +7,7 @@ import { hashPassword } from "@/lib/server/password";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 import { parseIconDataUrl } from "@/lib/server/branding";
+import { AUTH_POLICY_SETTING_KEY, defaultAuthPolicy } from "@/lib/server/auth-policy";
 
 const installSchema = z.object({
   installToken: z.string().min(1),
@@ -58,6 +59,9 @@ export async function POST(request: Request) {
           key: PLATFORM_SETTING_KEY,
           value: { name: platformName, description: platformDescription, publicUrl, hasCustomIcon: Boolean(icon), installedAt: new Date().toISOString(), version: 1 },
         },
+      });
+      await transaction.platformSetting.create({
+        data: { key: AUTH_POLICY_SETTING_KEY, value: defaultAuthPolicy },
       });
       if (icon) await transaction.platformAsset.create({ data: { key: "site-icon", mimeType: icon.mimeType, data: icon.data } });
       const admin = await transaction.user.create({

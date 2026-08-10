@@ -6,6 +6,8 @@ import { prisma } from "@/lib/server/prisma";
 
 const productInclude = {
   provider: true,
+  upstream: true,
+  _count: { select: { assets: true } },
   versions: {
     orderBy: { version: "desc" as const },
     include: { endpoints: { orderBy: [{ path: "asc" as const }, { method: "asc" as const }] } },
@@ -36,7 +38,8 @@ function mapProduct(product: ProductRecord, stats?: { calls: number; successes: 
     category: product.category,
     description: product.description,
     method: endpoint?.method ?? "GET",
-    endpoint: endpoint?.path ?? "/",
+    endpoint: endpoint?.publicPath ?? "/",
+    publicHost: endpoint?.publicHost ?? "",
     latency: stats?.latency == null ? null : Math.round(stats.latency),
     uptime: calls ? Number((((stats?.successes ?? 0) / calls) * 100).toFixed(2)) : null,
     calls,
@@ -53,15 +56,18 @@ function mapProduct(product: ProductRecord, stats?: { calls: number; successes: 
     unitPrice: product.unitPrice.toString(),
     freeQuotaMonthly: product.freeQuotaMonthly.toString(),
     status: product.status,
-    executionMode: product.executionMode,
+    visibility: product.visibility,
+    upstreamType: product.upstream?.type ?? "BUILTIN",
+    internalHandler: product.internalHandler,
+    assetCount: product._count.assets,
     updatedAt: product.updatedAt.toISOString(),
     schema: endpoint?.schema ?? {},
   };
 }
 
-export async function listCatalogProducts(input: { status?: ApiStatus; limit?: number } = {}) {
+export async function listCatalogProducts(input: { status?: ApiStatus; limit?: number; providerId?: string } = {}) {
   const products = await prisma.apiProduct.findMany({
-    where: input.status ? { status: input.status } : undefined,
+    where: { ...(input.status ? { status: input.status } : {}), ...(input.providerId ? { providerId: input.providerId } : {}) },
     include: productInclude,
     orderBy: [{ featured: "desc" }, { updatedAt: "desc" }],
     ...(input.limit ? { take: input.limit } : {}),
