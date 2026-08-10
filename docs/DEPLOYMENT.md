@@ -34,7 +34,19 @@ docker compose ps
 curl --fail https://api.example.com/api/health
 ```
 
-首次打开 `https://api.example.com/install`，输入 `.env` 中的 `INSTALL_TOKEN`，再设置网站名称、网站介绍、公开地址、网站图标和首个管理员账号。初始化成功后安装接口会永久关闭，管理员密码只通过安装页提交，不写入 Compose 配置。安装完成后，平台管理员仍可在“平台设置”中更新这些品牌信息；配置保存在 PostgreSQL 中，容器升级或重启不会丢失。
+首次打开 `https://api.example.com/install`。需要部署令牌时，在服务器项目目录执行：
+
+```bash
+npm run --silent install:token
+```
+
+该命令会自动定位当前项目正在运行的 `app` 容器，不依赖 Compose 重新解析 `.env`。如果服务器没有 Node.js/npm，但保留了完整的 Compose 项目环境，可直接执行：
+
+```bash
+docker compose exec app node /app/scripts/show-install-token.mjs
+```
+
+命令会在容器内部通过回环地址确认平台尚未初始化，再单独输出部署令牌，不会打印其他环境变量。输入令牌后设置网站名称、网站介绍、公开地址、网站图标和首个管理员账号。初始化成功后安装接口会永久关闭，上述命令也会拒绝再次显示令牌。管理员密码只通过安装页提交，不写入 Compose 配置。安装完成后，平台管理员仍可在“平台设置”中更新这些品牌信息；配置保存在 PostgreSQL 中，容器升级或重启不会丢失。
 
 ### IP 临时测试
 

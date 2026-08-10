@@ -1,10 +1,11 @@
 "use client";
 
-import { Eye, EyeOff, ImageIcon, Loader2, Upload } from "lucide-react";
+import { Check, Copy, Eye, EyeOff, ImageIcon, Loader2, ShieldCheck, SquareTerminal, Upload } from "lucide-react";
 import { ChangeEvent, FormEvent, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { FormField, FormHint, FormLabel, FormMessage } from "./ui/form-field";
 import { Input, InputGroup, Textarea } from "./ui/input";
 
@@ -68,7 +69,7 @@ export function InstallationForm() {
   }
 
   return <form onSubmit={submit} className="space-y-4">
-    <FormField><FormLabel>部署令牌</FormLabel><Input name="installToken" required type="password" autoComplete="off" placeholder="服务器 INSTALL_TOKEN" className="h-11 text-[12px]" /></FormField>
+    <div className="space-y-1.5"><div className="flex items-center justify-between gap-3"><FormLabel>部署令牌</FormLabel><InstallTokenHelp /></div><Input name="installToken" required type="password" autoComplete="off" placeholder="粘贴服务器返回的部署令牌" className="h-11 text-[12px]" /></div>
     <div className="grid gap-4 sm:grid-cols-2">
       <FormField><FormLabel>平台名称</FormLabel><Input name="platformName" required minLength={2} defaultValue="Star-API" className="h-11 text-[12px]" /></FormField>
       <FormField><FormLabel>访问地址</FormLabel><Input name="publicUrl" required type="url" placeholder="https://api.example.com" className="h-11 text-[12px]" /></FormField>
@@ -86,4 +87,34 @@ export function InstallationForm() {
     {error && <FormMessage>{error}</FormMessage>}
     <Button type="submit" size="lg" disabled={loading} className="w-full">{loading && <Loader2 className="animate-spin" />}{loading ? "正在初始化" : "完成安装并进入后台"}</Button>
   </form>;
+}
+
+function InstallTokenHelp() {
+  const [copied, setCopied] = useState("");
+  const commands = [
+    { label: "项目目录", value: "npm run --silent install:token" },
+    { label: "标准 Compose 环境", value: "docker compose exec app node /app/scripts/show-install-token.mjs" },
+  ];
+
+  async function copy(command: string) {
+    let copiedSuccessfully = false;
+    try {
+      await navigator.clipboard.writeText(command);
+      copiedSuccessfully = true;
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = command;
+      textarea.readOnly = true;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      copiedSuccessfully = document.execCommand("copy");
+      textarea.remove();
+    }
+    setCopied(copiedSuccessfully ? command : "");
+    if (copiedSuccessfully) window.setTimeout(() => setCopied(""), 1600);
+  }
+
+  return <Dialog><DialogTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[9px] text-[var(--brand-strong)]"><SquareTerminal />获取令牌</Button></DialogTrigger><DialogContent className="max-w-[520px]"><DialogHeader><DialogTitle>获取部署令牌</DialogTitle><DialogDescription>在运行平台的服务器项目目录执行命令。</DialogDescription></DialogHeader><DialogBody className="space-y-3">{commands.map((command, index) => <div key={command.value} className="rounded-[var(--radius-panel)] border border-[var(--line)] bg-[var(--surface-subtle)] p-3"><div className="mb-2 flex items-center justify-between"><span className="text-[9px] font-semibold text-[var(--muted)]">{command.label}</span>{index === 0 && <span className="text-[8px] font-semibold text-[var(--brand-strong)]">推荐</span>}</div><div className="flex items-center gap-2"><code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-[6px] bg-[var(--surface)] px-3 py-2.5 text-[10px] text-[var(--ink)]">{command.value}</code><Button type="button" variant="secondary" size="icon" onClick={() => copy(command.value)} aria-label={`${copied === command.value ? "已复制" : "复制"}${command.label}命令`}>{copied === command.value ? <Check className="text-[var(--success)]" /> : <Copy />}</Button></div></div>)}<div className="flex gap-2 rounded-[var(--radius-control)] border border-[var(--success-line)] bg-[var(--success-soft)] p-3 text-[9px] leading-5 text-[var(--success)]"><ShieldCheck className="mt-0.5 size-3.5 shrink-0" /><span>命令仅在平台尚未安装时返回令牌；完成初始化后会自动拒绝再次显示。</span></div></DialogBody></DialogContent></Dialog>;
 }
