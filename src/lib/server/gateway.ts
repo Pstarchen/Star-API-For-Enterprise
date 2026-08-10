@@ -1,6 +1,7 @@
 import "server-only";
 
 import { Prisma } from "@prisma/client";
+import { routeStaticSegmentCount } from "@/lib/api-routes";
 import { authenticateApiKey } from "@/lib/server/api-key";
 import { contentResponse } from "@/lib/server/api-assets";
 import { decryptJson } from "@/lib/server/encryption";
@@ -135,7 +136,19 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
     include: { parameters: true, responseRules: true, version: { include: { product: { include: { upstream: { include: { nodes: true } }, accessGrants: true } } } } },
     orderBy: { routeVersion: "desc" },
   });
-  const matched = candidates.map((endpoint) => ({ endpoint, pathParams: routeMatch(endpoint.publicPath, publicPath) })).find((item) => item.pathParams && (!routeVersion || item.endpoint.routeVersion === routeVersion));
+  const matched = candidates
+    .map((endpoint) => ({ endpoint, pathParams: routeMatch(endpoint.publicPath, publicPath) }))
+    .filter((item) => item.pathParams && (!routeVersion || item.endpoint.routeVersion === routeVersion))
+    .sort((left, right) => {
+      if (!routeVersion) {
+        const versionOrder = right.endpoint.routeVersion.localeCompare(left.endpoint.routeVersion, undefined, { numeric: true });
+        if (versionOrder) return versionOrder;
+      }
+      const methodOrder = Number(right.endpoint.method === requestedMethod) - Number(left.endpoint.method === requestedMethod);
+      if (methodOrder) return methodOrder;
+      const staticOrder = routeStaticSegmentCount(right.endpoint.publicPath) - routeStaticSegmentCount(left.endpoint.publicPath);
+      return staticOrder || right.endpoint.publicPath.length - left.endpoint.publicPath.length;
+    })[0];
   if (!matched) return jsonError(404, "ROUTE_NOT_FOUND", "请求域名、路径、版本或方法未匹配到已发布路由", requestId);
   const { endpoint, pathParams } = matched;
   const product = endpoint.version.product;

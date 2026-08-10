@@ -4,9 +4,10 @@ import { ArrowRight, CheckCircle2, CircleDollarSign, Clock3, KeyRound, TrendingU
 import { connection } from "next/server";
 import { UsageChart, type UsagePoint } from "@/components/usage-chart";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
+import { chinaDateKey, chinaDayStart, chinaMonthStart } from "@/lib/server/api-statistics";
 import { prisma } from "@/lib/server/prisma";
 
-type DailyRow = { day: Date; success: bigint; failed: bigint };
+type DailyRow = { day: string; success: bigint; failed: bigint };
 
 export default async function ConsolePage() {
   await connection();
@@ -14,8 +15,8 @@ export default async function ConsolePage() {
   const workspace = user ? await getCurrentWorkspace(user) : null;
   if (!workspace) return <EmptyWorkspace />;
   const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const month = new Date(now.getFullYear(), now.getMonth(), 1);
+  const today = chinaDayStart(now);
+  const month = chinaMonthStart(now);
   const week = new Date(today); week.setDate(week.getDate() - 6);
   const where = { app: { tenantId: workspace.tenantId } } as const;
   const [todayCount, todaySuccess, latency, monthCost, activeSubscriptions, recent, daily] = await Promise.all([
@@ -25,10 +26,10 @@ export default async function ConsolePage() {
     prisma.requestLog.aggregate({ where: { ...where, occurredAt: { gte: month } }, _sum: { amount: true } }),
     prisma.subscription.count({ where: { app: { tenantId: workspace.tenantId }, status: "ACTIVE" } }),
     prisma.requestLog.findMany({ where, include: { app: true, product: true }, orderBy: { occurredAt: "desc" }, take: 8 }),
-    prisma.$queryRaw<DailyRow[]>(Prisma.sql`SELECT date_trunc('day', r."occurredAt") AS day, COUNT(*) FILTER (WHERE r."statusCode" >= 200 AND r."statusCode" < 400) AS success, COUNT(*) FILTER (WHERE r."statusCode" < 200 OR r."statusCode" >= 400) AS failed FROM "RequestLog" r JOIN "Application" a ON a.id = r."appId" WHERE a."tenantId" = ${workspace.tenantId} AND r."occurredAt" >= ${week} GROUP BY 1 ORDER BY 1`),
+    prisma.$queryRaw<DailyRow[]>(Prisma.sql`SELECT to_char(r."occurredAt" + interval '8 hours', 'YYYY-MM-DD') AS day, COUNT(*) FILTER (WHERE r."statusCode" >= 200 AND r."statusCode" < 400) AS success, COUNT(*) FILTER (WHERE r."statusCode" < 200 OR r."statusCode" >= 400) AS failed FROM "RequestLog" r JOIN "Application" a ON a.id = r."appId" WHERE a."tenantId" = ${workspace.tenantId} AND r."occurredAt" >= ${week} GROUP BY 1 ORDER BY 1`),
   ]);
-  const dailyMap = new Map(daily.map((item) => [item.day.toISOString().slice(0, 10), item]));
-  const series: UsagePoint[] = Array.from({ length: 7 }, (_, index) => { const date = new Date(week); date.setDate(week.getDate() + index); const key = date.toISOString().slice(0, 10); const row = dailyMap.get(key); return { date: `${date.getMonth() + 1}/${date.getDate()}`, success: Number(row?.success ?? 0), failed: Number(row?.failed ?? 0) }; });
+  const dailyMap = new Map(daily.map((item) => [item.day, item]));
+  const series: UsagePoint[] = Array.from({ length: 7 }, (_, index) => { const date = new Date(week.getTime() + index * 24 * 60 * 60 * 1000); const key = chinaDateKey(date); const row = dailyMap.get(key); const [, monthNumber, dayNumber] = key.split("-"); return { date: `${Number(monthNumber)}/${Number(dayNumber)}`, success: Number(row?.success ?? 0), failed: Number(row?.failed ?? 0) }; });
   const successRate = todayCount ? `${((todaySuccess / todayCount) * 100).toFixed(2)}%` : "暂无";
   const metrics = [
     { label: "今日调用量", value: todayCount.toLocaleString("zh-CN"), icon: TrendingUp },

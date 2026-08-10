@@ -44,6 +44,7 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        PRISMA_ENGINES_MIRROR: ${PRISMA_ENGINES_MIRROR:-}
     image: star-api-platform:local
     restart: unless-stopped
     init: true

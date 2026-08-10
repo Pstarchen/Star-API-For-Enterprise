@@ -8,11 +8,16 @@ FROM base AS dependencies
 COPY package.json package-lock.json ./
 RUN npm ci
 
+FROM dependencies AS prisma-client
+ARG PRISMA_ENGINES_MIRROR
+ENV PRISMA_ENGINES_MIRROR=${PRISMA_ENGINES_MIRROR}
+COPY prisma ./prisma
+RUN npx prisma generate
+
 FROM base AS builder
-COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=prisma-client /app/node_modules ./node_modules
 COPY . .
 ENV DATABASE_URL="postgresql://starapi:build-only@postgres:5432/starapi?schema=public"
-RUN npx prisma generate
 RUN npm run build
 
 FROM dependencies AS migrator

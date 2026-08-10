@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ApiStatus, Prisma } from "@prisma/client";
 import { formatPrice, type CatalogProduct } from "@/lib/catalog";
+import { getProductCallStatistics, type ProductCallStatistics } from "@/lib/server/api-statistics";
 import { prisma } from "@/lib/server/prisma";
 
 const productInclude = {
@@ -16,17 +17,7 @@ const productInclude = {
 
 type ProductRecord = Prisma.ApiProductGetPayload<{ include: typeof productInclude }>;
 
-async function statsFor(productIds: string[]) {
-  if (!productIds.length) return new Map<string, { calls: number; successes: number; latency: number | null }>();
-  const [all, successful] = await Promise.all([
-    prisma.requestLog.groupBy({ by: ["productId"], where: { productId: { in: productIds } }, _count: { _all: true }, _avg: { latencyMs: true } }),
-    prisma.requestLog.groupBy({ by: ["productId"], where: { productId: { in: productIds }, statusCode: { gte: 200, lt: 400 } }, _count: { _all: true } }),
-  ]);
-  const successMap = new Map(successful.map((item) => [item.productId, item._count._all]));
-  return new Map(all.map((item) => [item.productId!, { calls: item._count._all, successes: successMap.get(item.productId) ?? 0, latency: item._avg.latencyMs }]));
-}
-
-function mapProduct(product: ProductRecord, stats?: { calls: number; successes: number; latency: number | null }): CatalogProduct {
+function mapProduct(product: ProductRecord, stats?: ProductCallStatistics): CatalogProduct {
   const version = product.versions[0] ?? null;
   const endpoint = version?.endpoints[0] ?? null;
   const calls = stats?.calls ?? 0;
@@ -40,9 +31,11 @@ function mapProduct(product: ProductRecord, stats?: { calls: number; successes: 
     method: endpoint?.method ?? "GET",
     endpoint: endpoint?.publicPath ?? "/",
     publicHost: endpoint?.publicHost ?? "",
-    latency: stats?.latency == null ? null : Math.round(stats.latency),
+    latency: stats?.averageLatency == null ? null : Math.round(stats.averageLatency),
     uptime: calls ? Number((((stats?.successes ?? 0) / calls) * 100).toFixed(2)) : null,
     calls,
+    todayCalls: stats?.todayCalls ?? 0,
+    lastCalledAt: stats?.lastCalledAt ?? null,
     price: formatPrice(product.billingMode, product.unitPrice.toString(), product.freeQuotaMonthly.toString()),
     tags: product.tags,
     featured: product.featured,
@@ -72,13 +65,13 @@ export async function listCatalogProducts(input: { status?: ApiStatus; limit?: n
     orderBy: [{ featured: "desc" }, { updatedAt: "desc" }],
     ...(input.limit ? { take: input.limit } : {}),
   });
-  const stats = await statsFor(products.map((item) => item.id));
+  const stats = await getProductCallStatistics(products.map((item) => item.id));
   return products.map((item) => mapProduct(item, stats.get(item.id)));
 }
 
 export async function getCatalogProduct(slug: string, publishedOnly = true) {
   const product = await prisma.apiProduct.findFirst({ where: { slug, ...(publishedOnly ? { status: "PUBLISHED" } : {}) }, include: productInclude });
   if (!product) return null;
-  const stats = await statsFor([product.id]);
+  const stats = await getProductCallStatistics([product.id]);
   return mapProduct(product, stats.get(product.id));
 }

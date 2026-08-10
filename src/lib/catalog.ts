@@ -13,6 +13,8 @@ export type CatalogProduct = {
   latency: number | null;
   uptime: number | null;
   calls: number;
+  todayCalls: number;
+  lastCalledAt: string | null;
   price: string;
   tags: string[];
   featured: boolean;

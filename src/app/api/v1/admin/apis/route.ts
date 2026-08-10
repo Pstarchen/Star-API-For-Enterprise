@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { apiSlugFromName, normalizePublicHost, normalizePublicPath } from "@/lib/api-routes";
 import { apiCategories } from "@/lib/catalog";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId, type ContentHandlerId } from "@/lib/internal-handlers";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
@@ -8,6 +9,7 @@ import { assetErrorMessage, prepareApiAssets, preparePhpPackage, type PreparedAs
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { getPlatformConfig } from "@/lib/server/installation";
+import { findRouteConflict, findSlugConflict } from "@/lib/server/api-routing";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream, checkUpstreamHealth } from "@/lib/server/upstream";
@@ -31,11 +33,11 @@ const createSchema = z.object({
   providerLegalName: optionalText(160),
   providerEmail: z.union([z.email(), z.literal("")]).optional().default(""),
   version: z.string().trim().max(24).regex(/^[A-Za-z0-9._-]*$/).optional().default("v1"),
-  publicHost: z.string().trim().toLowerCase().min(1).max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, "对外域名格式不正确"),
-  publicPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/, "公开路径必须以 / 开头且不能包含查询参数"),
+  publicHost: z.string().trim().toLowerCase().min(1).max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, "对外域名格式不正确").transform(normalizePublicHost),
+  publicPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/, "公开路径必须以 / 开头且不能包含查询参数").transform(normalizePublicPath),
   visibility: z.enum(["PUBLIC", "PRIVATE", "GRAY", "INTERNAL"]).default("PUBLIC"),
   method: z.enum(methods).optional().default("GET"),
-  path: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/, "路径必须以 / 开头且不能包含查询参数").optional().default("/"),
+  path: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/, "路径必须以 / 开头且不能包含查询参数").transform(normalizePublicPath).optional().default("/"),
   requestFormat: z.enum(["JSON", "FORM", "BINARY", "ANY"]).default("JSON"),
   summary: optionalText(160),
   internalHandler: z.enum(handlerIds).optional(),
@@ -102,11 +104,44 @@ function endpointSchema(sourceType: typeof sourceTypes[number]) {
   return { type: "object", properties: {} };
 }
 
+async function generatedSlug(name: string) {
+  const base = apiSlugFromName(name);
+  if (!await findSlugConflict(base)) return base;
+  for (let suffix = 2; suffix <= 999; suffix += 1) {
+    const candidate = `${base.slice(0, 76 - String(suffix).length)}-${suffix}`;
+    if (!await findSlugConflict(candidate)) return candidate;
+  }
+  return `${base.slice(0, 71)}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
 async function requestInput(request: Request) {
   if (!request.headers.get("content-type")?.includes("multipart/form-data")) throw new Error("MULTIPART_REQUIRED");
   const form = await request.formData();
   const raw = form.get("config");
-  const config = typeof raw === "string" ? JSON.parse(raw) : null;
+  const decoded = typeof raw === "string" ? JSON.parse(raw) : null;
+  if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("INVALID_CONFIG");
+  const supplied = decoded as Record<string, unknown>;
+  const name = typeof supplied.name === "string" ? supplied.name.trim() : "";
+  const hasExplicitSlug = typeof supplied.slug === "string" && supplied.slug.trim().length > 0;
+  const slug = hasExplicitSlug ? String(supplied.slug).trim() : await generatedSlug(name);
+  const publicPath = normalizePublicPath(typeof supplied.publicPath === "string" && supplied.publicPath.trim() ? supplied.publicPath : `/${slug}`);
+  const config = {
+    publicHost: process.env.API_PUBLIC_HOST ?? "api.localhost",
+    version: "v1",
+    visibility: "PUBLIC",
+    method: "GET",
+    requestFormat: "JSON",
+    corsEnabled: true,
+    forceHttps: (process.env.API_PUBLIC_URL ?? "https://api.localhost").startsWith("https://"),
+    requestLogging: true,
+    billingMode: "FREE",
+    defaultQpsLimit: 10,
+    ...supplied,
+    name,
+    slug,
+    publicPath,
+    path: typeof supplied.path === "string" && supplied.path.trim() ? normalizePublicPath(supplied.path) : publicPath,
+  };
   const parsed = createSchema.safeParse(config);
   const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
   return { parsed, files };
@@ -121,6 +156,13 @@ export async function POST(request: Request) {
   const input = payload.parsed.data;
   if (!auth.isAdmin && input.sourceType === "SERVER_LOCAL") return Response.json({ code: 403, message: "服务器内网服务仅平台管理员可以配置；服务商可使用公网或临时穿透上游" }, { status: 403, headers: noStoreHeaders });
   const handler = contentHandler(input.sourceType);
+  const effectiveMethod = handler ? "GET" : input.method;
+  const [slugConflict, routeConflict] = await Promise.all([
+    findSlugConflict(input.slug),
+    findRouteConflict({ publicHost: input.publicHost, publicPath: input.publicPath, routeVersion: input.version || "v1", method: effectiveMethod }),
+  ]);
+  if (slugConflict) return Response.json({ code: 409, message: `API 唯一标识已被“${slugConflict.name}”使用` }, { status: 409, headers: noStoreHeaders });
+  if (routeConflict) return Response.json({ code: 409, message: `公开路由与“${routeConflict.version.product.name}”冲突` }, { status: 409, headers: noStoreHeaders });
   if (["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(input.sourceType)) {
     const kind = input.sourceType === "EXTERNAL" ? "PUBLIC_API" : input.sourceType as "SERVER_LOCAL" | "TUNNEL";
     try {
@@ -146,7 +188,7 @@ export async function POST(request: Request) {
   const providerLegalName = input.providerLegalName || providerName;
   const providerEmail = input.providerEmail || auth.user.email;
   const selectedHandler = handler ?? (input.sourceType === "PHP_PACKAGE" ? phpHandlerId : input.sourceType === "BUILTIN" ? input.internalHandler : null);
-  const method = handler ? "GET" : input.method;
+  const method = effectiveMethod;
   const version = input.version || "v1";
   const shortName = input.shortName || Array.from(input.name).slice(0, 4).join("");
   const networkSource = ["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(input.sourceType);

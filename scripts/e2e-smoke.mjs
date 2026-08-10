@@ -192,7 +192,12 @@ async function main() {
   result = await jsonRequest("/api/v1/admin/auth-policy", {}, personalCookie);
   expectStatus(result.response.status, 403, "non-admin policy access denied", result.body);
 
-  const staticApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Static JSON Smoke", slug: `static-${runId}`, content: JSON.stringify({ ok: true, source: "static-json" }), billingMode: "PER_REQUEST", unitPrice: 0.25, dailyLimit: 1 });
+  const staticSlug = `static-${runId}`;
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(apiUrl).hostname, path: `/${staticSlug}`, version: "v1", method: "GET", slug: staticSlug })}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "route preflight available", result.body);
+  assert.equal(result.body.data.available, true);
+
+  const staticApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Static JSON Smoke", slug: staticSlug, content: JSON.stringify({ ok: true, source: "static-json" }), billingMode: "PER_REQUEST", unitPrice: 0.25, dailyLimit: 1 });
   const textApi = await createApi(adminCookie, { sourceType: "RANDOM_TEXT", name: "Random Text Smoke", slug: `text-${runId}`, content: "alpha\nbeta" });
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nZcAAAAASUVORK5CYII=", "base64");
   const imageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Random Image Smoke", slug: `image-${runId}` }, [{ name: "pixel.png", blob: new Blob([png], { type: "image/png" }) }]);
@@ -203,12 +208,36 @@ async function main() {
   const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: `/anything/external-${runId}`, upstreamBaseUrl: "https://httpbin.org", healthPath: "/status/200" });
   const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: `/anything/tunnel-${runId}`, upstreamBaseUrl: "https://httpbin.org", healthPath: "/status/200" });
 
+  const quickForm = new FormData();
+  quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
+  response = await request("/api/v1/admin/apis", { method: "POST", body: quickForm }, adminCookie);
+  let quickBody = await response.json().catch(() => null);
+  expectStatus(response.status, 201, "minimal quick API creation", quickBody);
+  const quickApi = quickBody.data;
+  assert.match(quickApi.slug, /^api-[a-z0-9]{6}(?:-\d+)?$/);
+  assert.equal(quickApi.endpoint, `/${quickApi.slug}`);
+  assert.equal(quickApi.publicHost, new URL(apiUrl).hostname);
+
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: staticApi.publicHost, path: staticApi.endpoint, version: "v1", method: "GET", slug: staticApi.slug })}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "route preflight detects conflict", result.body);
+  assert.equal(result.body.data.available, false);
+  assert.equal(result.body.data.routeAvailable, false);
+
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: phpApi.publicHost, path: phpApi.endpoint, version: "v1", method: "GET", slug: `php-get-${runId}` })}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "ALL method route conflict detection", result.body);
+  assert.equal(result.body.data.routeAvailable, false);
+
+  const duplicateRouteForm = new FormData();
+  duplicateRouteForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", name: "Duplicate Route", slug: `duplicate-${runId}`, publicHost: staticApi.publicHost, publicPath: staticApi.endpoint, content: JSON.stringify({ duplicate: true }) }));
+  response = await request("/api/v1/admin/apis", { method: "POST", body: duplicateRouteForm }, adminCookie);
+  expectStatus(response.status, 409, "duplicate route rejected on creation", await response.text());
+
   const privateForm = new FormData();
   privateForm.set("config", JSON.stringify({ sourceType: "EXTERNAL", name: "Blocked Private Upstream", slug: `blocked-upstream-${runId}`, publicHost: new URL(apiUrl).hostname, publicPath: `/blocked-upstream-${runId}`, upstreamBaseUrl: "http://127.0.0.1:8080" }));
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi]) await publishApi(adminCookie, product);
+  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "E2E Test App", environment: "TEST" } }, personalCookie);
   expectStatus(result.response.status, 201, "create application and API key", result.body);
@@ -216,7 +245,11 @@ async function main() {
   const apiKey = result.body.data.secret;
   assert.match(apiKey, /^sk_test_/);
 
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi]) await subscribe(personalCookie, appId, product.id, product.slug);
+  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await subscribe(personalCookie, appId, product.id, product.slug);
+
+  result = await jsonRequest("/api/v1/admin/apis/statistics", {}, adminCookie);
+  expectStatus(result.response.status, 200, "statistics before gateway calls", result.body);
+  const callsBefore = result.body.data.totalCalls;
 
   response = await request(`/${staticApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "gateway static JSON call", await response.text());
@@ -239,8 +272,16 @@ async function main() {
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
   response = await request(`/anything/tunnel-${runId}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "tunnel upstream gateway call", await response.text());
+  response = await request(`/${quickApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  expectStatus(response.status, 200, "quick-created API gateway call", await response.text());
   response = await request(`/${textApi.slug}`, { headers: { Authorization: "Bearer invalid-key" } }, "", apiUrl);
   expectStatus(response.status, 401, "invalid API key rejected", await response.text());
+
+  result = await jsonRequest("/api/v1/admin/apis/statistics", {}, adminCookie);
+  expectStatus(result.response.status, 200, "statistics after gateway calls", result.body);
+  assert.ok(result.body.data.totalCalls >= callsBefore + 9, "successful gateway calls must increase total statistics");
+  assert.ok(result.body.data.todayCalls >= callsBefore + 9, "successful gateway calls must increase today's statistics");
+  assert.ok(result.body.data.daily.reduce((sum, point) => sum + point.success + point.failed, 0) >= 9, "seven-day series must contain gateway calls");
 
   const providerApi = await createApi(enterpriseCookie, { sourceType: "STATIC_JSON", name: "Provider Review Smoke", slug: `provider-${runId}`, content: JSON.stringify({ provider: true }) });
   result = await jsonRequest("/api/v1/admin/apis", { method: "PATCH", body: { id: providerApi.id, status: "REVIEW" } }, enterpriseCookie);

@@ -1,15 +1,17 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { normalizePublicHost, normalizePublicPath } from "@/lib/api-routes";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
+import { findRouteConflict } from "@/lib/server/api-routing";
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream, checkUpstreamHealth } from "@/lib/server/upstream";
 
-const pathSchema = z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/);
-const hostSchema = z.string().trim().toLowerCase().min(1).max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
+const pathSchema = z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/).transform(normalizePublicPath);
+const hostSchema = z.string().trim().toLowerCase().min(1).max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/).transform(normalizePublicHost);
 const nodeSchema = z.object({ id: z.string().optional(), name: z.string().trim().min(1).max(80), baseUrl: z.url(), weight: z.coerce.number().int().min(1).max(10000), enabled: z.boolean() }).strict();
 const parameterSchema = z.object({ location: z.enum(["PATH", "QUERY", "BODY"]), name: z.string().trim().min(1).max(80), upstreamName: z.string().trim().max(80).optional().default(""), required: z.boolean(), dataType: z.enum(["string", "integer", "number", "boolean", "array", "object"]), pattern: z.string().max(300).optional().default(""), sensitive: z.boolean() }).strict();
 const updateSchema = z.object({
@@ -66,10 +68,12 @@ export async function PATCH(request: Request) {
   if (!product || !product.upstream || !product.versions[0]?.endpoints[0]) return Response.json({ code: 404, message: "API 配置不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.upstream.type === "SERVER_LOCAL") return Response.json({ code: 403, message: "服务商不能修改服务器内网上游" }, { status: 403, headers: noStoreHeaders });
   if (["PUBLIC_API", "SERVER_LOCAL", "TUNNEL"].includes(product.upstream.type) && !parsed.data.upstream.nodes.length) return Response.json({ code: 400, message: "网络上游至少需要一个节点" }, { status: 400, headers: noStoreHeaders });
+  const endpoint = product.versions[0].endpoints[0];
+  const routeConflict = await findRouteConflict({ publicHost: parsed.data.route.publicHost, publicPath: parsed.data.route.publicPath, routeVersion: parsed.data.route.routeVersion, method: parsed.data.route.method, excludeEndpointId: endpoint.id });
+  if (routeConflict) return Response.json({ code: 409, message: `公开路由与“${routeConflict.version.product.name}”冲突` }, { status: 409, headers: noStoreHeaders });
   try {
     for (const node of parsed.data.upstream.nodes) await assertSafeUpstream(node.baseUrl, product.upstream.type as "PUBLIC_API" | "SERVER_LOCAL" | "TUNNEL");
   } catch (error) { return Response.json({ code: 400, message: `上游地址不允许：${error instanceof Error ? error.message : "INVALID_UPSTREAM"}` }, { status: 400, headers: noStoreHeaders }); }
-  const endpoint = product.versions[0].endpoints[0];
   const secret = parsed.data.upstream.preserveSecret ? undefined : parsed.data.upstream.authType === "BEARER" ? { token: parsed.data.upstream.token } : parsed.data.upstream.authType === "HEADER" ? { headerName: parsed.data.upstream.headerName, headerValue: parsed.data.upstream.headerValue } : null;
   try {
     await prisma.$transaction(async (transaction) => {
@@ -113,6 +117,8 @@ export async function POST(request: Request) {
   const source = await managedProduct(clone.data.id, auth);
   const sourceEndpoint = source?.versions[0]?.endpoints[0];
   if (!source || !source.upstream || !sourceEndpoint) return Response.json({ code: 404, message: "源 API 不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
+  const routeConflict = await findRouteConflict({ publicHost: sourceEndpoint.publicHost, publicPath: clone.data.publicPath, routeVersion: sourceEndpoint.routeVersion, method: sourceEndpoint.method });
+  if (routeConflict) return Response.json({ code: 409, message: `克隆路由与“${routeConflict.version.product.name}”冲突` }, { status: 409, headers: noStoreHeaders });
   try {
     await prisma.$transaction(async (transaction) => {
       const product = await transaction.apiProduct.create({ data: { providerId: source.providerId, slug: clone.data.slug, name: clone.data.name, shortName: Array.from(clone.data.name).slice(0, 4).join(""), description: source.description, category: source.category, color: source.color, tags: source.tags, featured: false, status: "DRAFT", visibility: source.visibility, sla: source.sla, internalHandler: source.internalHandler, executionConfig: source.executionConfig as Prisma.InputJsonValue, billingMode: source.billingMode, unitPrice: source.unitPrice, freeQuotaMonthly: source.freeQuotaMonthly, defaultQpsLimit: source.defaultQpsLimit } });
