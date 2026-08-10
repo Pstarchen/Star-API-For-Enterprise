@@ -1,3 +1,15 @@
+import { Database } from "lucide-react";
+import { Card } from "./ui/card";
+import { EmptyState } from "./ui/empty-state";
+import { Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "./ui/table";
+
 export function ResourceTablePage({ eyebrow, title, description, columns, rows, emptyText = "暂无真实记录" }: { eyebrow: string; title: string; description: string; columns: string[]; rows: React.ReactNode[][]; emptyText?: string }) {
-  return <div className="mx-auto max-w-[1440px] space-y-5"><div><p className="eyebrow">{eyebrow}</p><h2 className="mt-1 text-xl font-bold">{title}</h2><p className="mt-1 max-w-3xl text-[11px] leading-5 text-[var(--muted)]">{description}</p></div><section className="panel overflow-hidden"><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[11px]"><thead className="bg-[var(--surface-subtle)] text-[var(--muted)]"><tr>{columns.map((column) => <th key={column} className="px-5 py-3 font-semibold">{column}</th>)}</tr></thead><tbody className="divide-y divide-[var(--line)]">{rows.map((row, rowIndex) => <tr key={rowIndex} className="transition-colors hover:bg-[var(--surface-subtle)]">{row.map((cell, cellIndex) => <td key={cellIndex} className="px-5 py-4">{cell}</td>)}</tr>)}</tbody></table></div>{!rows.length && <div className="grid min-h-52 place-items-center px-6 text-center"><div><strong className="block text-[12px]">{emptyText}</strong><p className="mt-1 text-[10px] text-[var(--muted)]">这里会显示数据库中的真实记录。</p></div></div>}<div className="border-t border-[var(--line)] px-5 py-3 text-[9px] text-[var(--muted)]">共 {rows.length} 条真实记录</div></section></div>;
+  return <div className="page-shell space-y-5">
+    <div><p className="eyebrow">{eyebrow}</p><h2 className="page-title mt-1">{title}</h2><p className="page-description mt-1">{description}</p></div>
+    <Card className="overflow-hidden">
+      <TableContainer><Table className="min-w-[760px]"><TableHeader><TableRow className="hover:bg-transparent">{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow></TableHeader><TableBody>{rows.map((row, rowIndex) => <TableRow key={rowIndex}>{row.map((cell, cellIndex) => <TableCell key={cellIndex}>{cell}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer>
+      {!rows.length && <EmptyState icon={Database} title={emptyText} description="这里会显示数据库中的真实记录。" />}
+      <div className="border-t border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-3 text-[9px] text-[var(--muted)]">共 {rows.length} 条真实记录</div>
+    </Card>
+  </div>;
 }

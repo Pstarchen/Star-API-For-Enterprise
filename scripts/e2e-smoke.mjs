@@ -205,8 +205,8 @@ async function main() {
   const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, method: "ALL", entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
   const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}`, healthPath: "/health" });
-  const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: `/anything/external-${runId}`, upstreamBaseUrl: "https://httpbin.org", healthPath: "/status/200" });
-  const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: `/anything/tunnel-${runId}`, upstreamBaseUrl: "https://httpbin.org", healthPath: "/status/200" });
+  const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: "/README.md", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/README.md" });
+  const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: "/LICENSE", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/LICENSE" });
 
   const quickForm = new FormData();
   quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
@@ -268,9 +268,9 @@ async function main() {
   expectStatus(response.status, 200, "built-in API gateway call", await response.text());
   response = await request(`/${localApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "server-local gateway call", await response.text());
-  response = await request(`/anything/external-${runId}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request("/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
-  response = await request(`/anything/tunnel-${runId}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request("/LICENSE", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "tunnel upstream gateway call", await response.text());
   response = await request(`/${quickApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "quick-created API gateway call", await response.text());

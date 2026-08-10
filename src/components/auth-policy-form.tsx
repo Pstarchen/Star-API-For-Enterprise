@@ -3,6 +3,9 @@
 import { CheckCircle2, Loader2, LockKeyhole, Save, UserPlus } from "lucide-react";
 import { useState } from "react";
 import type { AuthPolicy } from "@/lib/server/auth-policy";
+import { Button } from "./ui/button";
+import { FormMessage } from "./ui/form-field";
+import { Switch } from "./ui/switch";
 
 export function AuthPolicyForm({ initial }: { initial: AuthPolicy }) {
   const [policy, setPolicy] = useState(initial);
@@ -35,7 +38,7 @@ export function AuthPolicyForm({ initial }: { initial: AuthPolicy }) {
   }
 
   return (
-    <section className="mx-auto max-w-3xl space-y-4">
+    <section className="page-shell max-w-3xl space-y-4">
       <div>
         <p className="eyebrow">AUTHENTICATION POLICY</p>
         <h2 className="mt-1 text-xl font-bold">登录与注册策略</h2>
@@ -57,12 +60,10 @@ export function AuthPolicyForm({ initial }: { initial: AuthPolicy }) {
           disabled={!policy.passwordLoginEnabled}
           onChange={(checked) => setPolicy((value) => ({ ...value, registrationEnabled: checked }))}
         />
-        {error && <p role="alert" className="mx-5 mb-4 rounded-[6px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}
+        {error && <FormMessage className="mx-5 mb-4">{error}</FormMessage>}
         <div className="flex items-center justify-end gap-3 border-t border-[var(--line)] px-5 py-4">
           {saved && <span className="inline-flex items-center gap-1.5 text-[10px] text-[var(--success)]"><CheckCircle2 className="size-3.5" />策略已生效</span>}
-          <button type="button" onClick={save} disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-50">
-            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}{saving ? "正在保存" : "保存登录策略"}
-          </button>
+          <Button type="button" onClick={save} disabled={saving} size="sm">{saving ? <Loader2 className="animate-spin" /> : <Save />}{saving ? "正在保存" : "保存登录策略"}</Button>
         </div>
       </div>
     </section>
@@ -74,7 +75,7 @@ function PolicyToggle({ icon: Icon, title, description, checked, disabled, onCha
     <label className={`flex items-start gap-3 border-b border-[var(--line)] px-5 py-4 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
       <span className="grid size-9 shrink-0 place-items-center rounded-[6px] bg-[var(--brand-soft)] text-[var(--brand)]"><Icon className="size-4" /></span>
       <span className="min-w-0 flex-1"><span className="block text-[12px] font-bold">{title}</span><span className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{description}</span></span>
-      <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} className="mt-2 size-4 accent-[var(--brand)]" />
+      <Switch checked={checked} disabled={disabled} onCheckedChange={onChange} className="mt-2" />
     </label>
   );
 }

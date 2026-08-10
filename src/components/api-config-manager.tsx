@@ -3,6 +3,10 @@
 import { Activity, Copy, Loader2, Network, Plus, Save, Settings2, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import type { CatalogProduct } from "@/lib/catalog";
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
+import { Switch } from "./ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 
 type NodeConfig = { id?: string; name: string; baseUrl: string; weight: number; enabled: boolean; healthStatus?: string; failureCount?: number; lastCheckedAt?: string | null; lastError?: string | null };
 type ParameterConfig = { id?: string; location: "PATH" | "QUERY" | "BODY"; name: string; upstreamName: string; required: boolean; dataType: "string" | "integer" | "number" | "boolean" | "array" | "object"; pattern: string; sensitive: boolean };
@@ -55,10 +59,9 @@ export function ApiConfigManager({ api, close, updated }: { api: CatalogProduct;
   function updateParameter(index: number, patch: Partial<ParameterConfig>) { if (!config) return; setConfig({ ...config, parameters: config.parameters.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item) }); }
   function removeParameter(index: number) { if (!config) return; setConfig({ ...config, parameters: config.parameters.filter((_, itemIndex) => itemIndex !== index) }); }
 
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-3 sm:p-5" onMouseDown={close}>
-    <div onMouseDown={(event) => event.stopPropagation()} className="mx-auto my-3 w-full max-w-5xl overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface)] shadow-2xl">
-      <header className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">API 配置中心</h3><p className="mt-1 text-[9px] text-[var(--muted)]">{api.name} · {api.slug}</p></div><button type="button" onClick={close} className="grid size-8 place-items-center rounded-[7px] hover:bg-[var(--surface-subtle)]" aria-label="关闭"><X className="size-4" /></button></header>
-      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--line)] px-4 py-2">{([['route', Settings2, '公开路由'], ['upstream', Network, '上游与计费'], ['parameters', SlidersHorizontal, '参数校验'], ['clone', Copy, '克隆复制']] as const).map(([id, Icon, label]) => <button key={id} type="button" onClick={() => setTab(id)} className={`inline-flex h-9 shrink-0 items-center gap-2 rounded-[7px] px-3 text-[10px] ${tab === id ? "bg-[var(--night)] text-white" : "text-[var(--muted)] hover:bg-[var(--surface-subtle)]"}`}><Icon className="size-3.5" />{label}</button>)}</nav>
+  return <Dialog open onOpenChange={(open) => { if (!open) close(); }}><DialogContent className="w-[min(calc(100%-24px),1024px)] p-0" showClose={false}>
+      <header className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><DialogTitle>API 配置中心</DialogTitle><DialogDescription>{api.name} · {api.slug}</DialogDescription></div><Button type="button" onClick={close} variant="ghost" size="icon-sm" aria-label="关闭"><X /></Button></header>
+      <Tabs value={tab} onValueChange={(value) => setTab(value as typeof tab)} className="gap-0"><div className="overflow-x-auto border-b border-[var(--line)] px-4 py-2"><TabsList>{([['route', Settings2, '公开路由'], ['upstream', Network, '上游与计费'], ['parameters', SlidersHorizontal, '参数校验'], ['clone', Copy, '克隆复制']] as const).map(([id, Icon, label]) => <TabsTrigger key={id} value={id}><Icon className="size-3.5" />{label}</TabsTrigger>)}</TabsList></div></Tabs>
       <div className="min-h-[430px] p-5">
         {!config && !error && <div className="grid min-h-80 place-items-center"><Loader2 className="size-6 animate-spin text-[var(--brand)]" /></div>}
         {config && tab === "route" && <RouteFields config={config} setConfig={setConfig} />}
@@ -68,9 +71,8 @@ export function ApiConfigManager({ api, close, updated }: { api: CatalogProduct;
         {message && <p role="status" className="mt-4 rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2.5 text-[10px] text-[var(--aqua)]">{message}</p>}
         {error && <p role="alert" className="mt-4 rounded-[8px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{error}</p>}
       </div>
-      <footer className="flex items-center justify-between border-t border-[var(--line)] px-5 py-4"><span className="text-[9px] text-[var(--muted)]">保存路由或上游后，API 会回到草稿状态并等待重新发布。</span><div className="flex gap-2"><button type="button" onClick={close} className="h-9 rounded-[8px] border border-[var(--line)] px-4 text-[10px]">关闭</button>{tab !== "clone" && <button type="button" onClick={save} disabled={!config || saving} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-50">{saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}保存配置</button>}</div></footer>
-    </div>
-  </div>;
+      <footer className="flex flex-col gap-3 border-t border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><span className="text-[9px] text-[var(--muted)]">保存路由或上游后，API 会回到草稿状态并等待重新发布。</span><div className="flex justify-end gap-2"><Button type="button" onClick={close} variant="secondary" size="sm">关闭</Button>{tab !== "clone" && <Button type="button" onClick={save} disabled={!config || saving} size="sm">{saving ? <Loader2 className="animate-spin" /> : <Save />}保存配置</Button>}</div></footer>
+  </DialogContent></Dialog>;
 }
 
 function RouteFields({ config, setConfig }: { config: ApiConfig; setConfig: (value: ApiConfig) => void }) {
@@ -96,4 +98,4 @@ function CloneFields({ config, updated, close, setError, setMessage }: { config:
 function splitList(value: string) { return value.split(",").map((item) => item.trim()).filter(Boolean); }
 function SectionTitle({ title, description }: { title: string; description: string }) { return <div className="mb-4"><h4 className="text-[12px] font-bold">{title}</h4><p className="mt-1 text-[9px] text-[var(--muted)]">{description}</p></div>; }
 function Field({ label, optional = false, children }: { label: string; optional?: boolean; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 flex gap-1 text-[9px] font-semibold">{label}{optional && <em className="not-italic font-normal text-[var(--muted)]">可选</em>}</span>{children}</label>; }
-function Toggle({ label, checked, change }: { label: string; checked: boolean; change: (value: boolean) => void }) { return <label className="flex h-10 items-center gap-2 rounded-[8px] border border-[var(--line)] px-3 text-[10px]"><input type="checkbox" checked={checked} onChange={(event) => change(event.target.checked)} />{label}</label>; }
+function Toggle({ label, checked, change }: { label: string; checked: boolean; change: (value: boolean) => void }) { return <label className="flex h-10 items-center justify-between gap-2 rounded-[8px] border border-[var(--line)] bg-[var(--surface-raised)] px-3 text-[10px]"><span>{label}</span><Switch checked={checked} onCheckedChange={change} /></label>; }

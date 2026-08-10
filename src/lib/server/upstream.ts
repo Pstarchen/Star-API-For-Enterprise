@@ -52,9 +52,19 @@ export function chooseUpstreamNode<T extends { weight: number }>(nodes: T[]) {
 export async function checkUpstreamHealth(input: { baseUrl: string; healthPath: string; timeoutMs: number; kind: UpstreamKind }) {
   const base = await assertSafeUpstream(input.baseUrl, input.kind);
   const target = new URL(input.healthPath.replace(/^\/+/, ""), `${base.toString().replace(/\/+$/, "")}/`);
-  const response = await fetch(target, { method: "GET", redirect: "error", signal: AbortSignal.timeout(Math.min(input.timeoutMs, 10000)), cache: "no-store" });
-  if (!response.ok) throw new Error(`HEALTH_STATUS_${response.status}`);
-  return response.status;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(target, { method: "GET", redirect: "error", signal: AbortSignal.timeout(Math.min(input.timeoutMs, 10000)), cache: "no-store" });
+      if (!response.ok) throw new Error(`HEALTH_STATUS_${response.status}`);
+      return response.status;
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("HEALTH_STATUS_")) throw error;
+      lastError = error;
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+  }
+  throw lastError;
 }
 
 export async function forwardRequest(input: {

@@ -3,6 +3,13 @@
 import { CheckCircle2, Code2, CreditCard, GitBranch, Landmark, Loader2, Mail, Save, Send } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 import type { IntegrationKey } from "@/lib/server/integrations";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { FormMessage } from "./ui/form-field";
+import { Input, Textarea } from "./ui/input";
+import { Switch } from "./ui/switch";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 
 export type IntegrationSummary = {
   key: IntegrationKey;
@@ -90,8 +97,6 @@ const definitions: Record<IntegrationKey, Definition> = {
   },
 };
 
-const inputClass = "h-10 w-full rounded-[6px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[11px] outline-none focus:border-[var(--brand)]";
-
 export function IntegrationSettingsForm({ initial }: { initial: IntegrationSummary[] }) {
   const [items, setItems] = useState(initial);
   const [active, setActive] = useState<IntegrationKey>("github");
@@ -101,24 +106,25 @@ export function IntegrationSettingsForm({ initial }: { initial: IntegrationSumma
   );
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
+    <div className="page-shell max-w-3xl space-y-5">
       <div>
         <p className="eyebrow">PLATFORM INTEGRATIONS</p>
         <h2 className="mt-1 text-xl font-bold">登录、邮件与收款</h2>
         <p className="mt-1 text-[11px] text-[var(--muted)]">敏感凭据加密保存，后台只显示配置状态，不回传原文。</p>
       </div>
-      <div className="grid grid-cols-2 gap-1 rounded-[8px] border border-[var(--line)] bg-[var(--surface-subtle)] p-1 sm:grid-cols-5">
+      <Tabs value={active} onValueChange={(value) => setActive(value as IntegrationKey)}>
+      <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-5">
         {(Object.keys(definitions) as IntegrationKey[]).map((key) => {
           const item = items.find((value) => value.key === key);
           const Icon = definitions[key].icon;
           return (
-            <button key={key} onClick={() => setActive(key)} className={`relative flex h-12 items-center justify-center gap-2 rounded-[6px] px-2 text-[9px] font-semibold ${active === key ? "bg-[var(--surface)] text-[var(--brand)] shadow-sm" : "text-[var(--muted)] hover:text-[var(--ink)]"}`}>
+            <TabsTrigger key={key} value={key} className="relative h-10 px-2 text-[9px]">
               <Icon className="size-3.5" />{definitions[key].label}
               <span className={`absolute right-1.5 top-1.5 size-1.5 rounded-full ${item?.enabled ? "bg-[var(--success)]" : "bg-[var(--line-strong)]"}`} />
-            </button>
+            </TabsTrigger>
           );
         })}
-      </div>
+      </TabsList></Tabs>
       <IntegrationEditor
         key={active}
         item={current}
@@ -200,35 +206,31 @@ function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSum
         <div>
           <div className="flex items-center gap-2">
             <h3 className="text-[13px] font-bold">{definition.label}</h3>
-            <span className={`rounded-[4px] px-2 py-1 text-[8px] font-semibold ${item.configured ? "bg-[var(--brand-soft)] text-[var(--brand-strong)]" : "bg-[var(--warning-soft)] text-[var(--warning)]"}`}>{item.configured ? "凭据已配置" : "凭据未配置"}</span>
+            <Badge variant={item.configured ? "brand" : "warning"}>{item.configured ? "凭据已配置" : "凭据未配置"}</Badge>
           </div>
           <p className="mt-1 text-[9px] text-[var(--muted)]">{definition.description}</p>
         </div>
         <label className="flex items-center gap-2 text-[10px] font-semibold">
           <span>{enabled ? "已启用" : "未启用"}</span>
-          <input type="checkbox" checked={enabled} onChange={(event) => { setEnabled(event.target.checked); setSaved(false); }} className="size-4 accent-[var(--brand)]" />
+          <Switch checked={enabled} onCheckedChange={(checked) => { setEnabled(checked); setSaved(false); }} />
         </label>
       </div>
       <form onSubmit={submit}>
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           {definition.fields.map((field) => <IntegrationField key={field.name} field={field} item={item} />)}
-          {item.key === "smtp" && <label className="flex items-center gap-2 text-[10px]"><input name="secure" type="checkbox" defaultChecked={item.publicConfig.secure === true} />使用 TLS 直连</label>}
-          {item.configured && item.key !== "bank-transfer" && <label className="flex items-center gap-2 text-[9px] text-[var(--danger)]"><input name="removeSecrets" type="checkbox" />保存时移除现有凭据</label>}
-          {error && <p role="alert" className="sm:col-span-2 rounded-[6px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}
+          {item.key === "smtp" && <label className="flex items-center gap-2 text-[10px]"><Checkbox name="secure" defaultChecked={item.publicConfig.secure === true} />使用 TLS 直连</label>}
+          {item.configured && item.key !== "bank-transfer" && <label className="flex items-center gap-2 text-[9px] text-[var(--danger)]"><Checkbox name="removeSecrets" />保存时移除现有凭据</label>}
+          {error && <FormMessage className="sm:col-span-2">{error}</FormMessage>}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-[var(--line)] px-5 py-4">
           {saved && <span className="inline-flex items-center gap-1.5 text-[10px] text-[var(--success)]"><CheckCircle2 className="size-3.5" />配置已保存</span>}
-          <button disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-50">
-            {saving ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}{saving ? "正在保存" : "保存配置"}
-          </button>
+          <Button disabled={saving} size="sm">{saving ? <Loader2 className="animate-spin" /> : <Save />}{saving ? "正在保存" : "保存配置"}</Button>
         </div>
       </form>
       {item.key === "smtp" && item.enabled && item.configured && (
         <div className="flex flex-col gap-2 border-t border-[var(--line)] bg-[var(--surface-subtle)] p-5 sm:flex-row">
-          <input type="email" value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} placeholder="测试收件邮箱" className={inputClass} />
-          <button onClick={testSmtp} disabled={testing || !testRecipient} className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[6px] border border-[var(--line-strong)] bg-[var(--surface)] px-4 text-[10px] font-semibold disabled:opacity-50">
-            {testing ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}发送测试邮件
-          </button>
+          <Input type="email" value={testRecipient} onChange={(event) => setTestRecipient(event.target.value)} placeholder="测试收件邮箱" />
+          <Button type="button" onClick={testSmtp} disabled={testing || !testRecipient} variant="secondary">{testing ? <Loader2 className="animate-spin" /> : <Send />}发送测试邮件</Button>
           {testMessage && <span className="self-center text-[9px] text-[var(--muted)]">{testMessage}</span>}
         </div>
       )}
@@ -243,9 +245,9 @@ function IntegrationField({ field, item }: { field: FieldSpec; item: Integration
     <label className={field.multiline ? "block sm:col-span-2" : "block"}>
       <span className="mb-1.5 block text-[10px] font-semibold">{field.label}</span>
       {field.multiline ? (
-        <textarea name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} className="mono w-full rounded-[6px] border border-[var(--line)] bg-[var(--surface)] p-3 text-[10px] leading-5 outline-none focus:border-[var(--brand)]" />
+        <Textarea name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} className="mono text-[10px]" />
       ) : (
-        <input name={field.name} type={field.secret ? "password" : field.type ?? "text"} defaultValue={value} placeholder={placeholder} autoComplete="off" className={inputClass} />
+        <Input name={field.name} type={field.secret ? "password" : field.type ?? "text"} defaultValue={value} placeholder={placeholder} autoComplete="off" />
       )}
       {field.secret && <small className="mt-1 block text-[8px] text-[var(--muted)]">新值提交后加密保存，页面不会再次显示。</small>}
     </label>

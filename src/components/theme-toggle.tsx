@@ -1,8 +1,10 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
+import { forwardRef } from "react";
+import { cn } from "@/lib/utils";
 
-export function ThemeToggle({ className = "" }: { className?: string }) {
+export const ThemeToggle = forwardRef<HTMLButtonElement, React.ComponentPropsWithoutRef<"button">>(function ThemeToggle({ className, onClick, ...props }, ref) {
   function toggleTheme() {
     const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = nextTheme;
@@ -10,7 +12,7 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
     localStorage.setItem("star-api-theme", nextTheme);
   }
 
-  return <button type="button" onClick={toggleTheme} className={className} aria-label="切换深浅色模式" title="切换深浅色模式">
+  return <button ref={ref} type="button" className={cn(className)} aria-label="切换深浅色模式" {...props} onClick={(event) => { toggleTheme(); onClick?.(event); }}>
     <Moon className="theme-icon-light size-4" /><Sun className="theme-icon-dark size-4" />
   </button>;
-}
+});

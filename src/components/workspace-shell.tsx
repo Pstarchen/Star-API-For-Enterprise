@@ -2,39 +2,38 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Activity, AppWindow, Boxes, Building2, ChevronDown, CreditCard, Gauge, KeyRound, LogOut, Menu, ScrollText, Settings, ShieldCheck, UserRound, Users, Webhook } from "lucide-react";
+import { Activity, AppWindow, Boxes, Building2, Check, ChevronDown, CreditCard, Gauge, KeyRound, LogOut, Menu, ScrollText, Settings, ShieldCheck, UserRound, Users, Webhook } from "lucide-react";
 import { useState } from "react";
 import { BrandMark } from "./brand-mark";
 import { ThemeToggle } from "./theme-toggle";
-import { cn } from "@/lib/utils";
 import { useBranding } from "./branding-provider";
+import { Avatar, AvatarFallback } from "./ui/avatar";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { cn } from "@/lib/utils";
 
 const workspaceIcons = { activity: Activity, apps: AppWindow, boxes: Boxes, building: Building2, billing: CreditCard, overview: Gauge, access: KeyRound, audits: ScrollText, settings: Settings, risk: ShieldCheck, users: Users, user: UserRound, webhooks: Webhook } as const;
 
 export type WorkspaceNavItem = { href: string; label: string; icon: keyof typeof workspaceIcons; badge?: string };
 export type WorkspaceOption = { id: string; name: string; type: "PERSONAL" | "ENTERPRISE"; status: string; role: string };
-
-type CurrentUser = {
-  name: string;
-  email: string;
-  workspaces: WorkspaceOption[];
-};
+type CurrentUser = { name: string; email: string; workspaces: WorkspaceOption[] };
 
 export function WorkspaceShell({ children, nav, title, currentUser, admin = false }: { children: React.ReactNode; nav: WorkspaceNavItem[]; title: string; currentUser: CurrentUser; admin?: boolean }) {
   const pathname = usePathname();
   const branding = useBranding();
   const router = useRouter();
   const [workspaceId, setWorkspaceId] = useState(currentUser.workspaces[0]?.id ?? "");
-  const [workspaceMenu, setWorkspaceMenu] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const workspace = currentUser.workspaces.find((item) => item.id === workspaceId) ?? currentUser.workspaces[0];
+  const initials = currentUser.name.slice(0, 1).toUpperCase();
 
   async function selectWorkspace(id: string) {
     setWorkspaceId(id);
-    setWorkspaceMenu(false);
     const response = await fetch("/api/v1/workspace", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tenantId: id }) });
-    if (!response.ok) return;
-    router.refresh();
+    if (response.ok) router.refresh();
   }
 
   async function logout() {
@@ -44,21 +43,41 @@ export function WorkspaceShell({ children, nav, title, currentUser, admin = fals
     router.refresh();
   }
 
-  const initials = currentUser.name.slice(0, 1).toUpperCase();
-  return <div className="workspace-atmosphere min-h-screen lg:grid lg:grid-cols-[248px_1fr]">
-    <aside className="hidden min-h-screen overflow-hidden border-r border-white/10 bg-[#171724] text-white lg:fixed lg:inset-y-0 lg:flex lg:w-[248px] lg:flex-col">
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-64 bg-[url('/art/anime-operator.jpg')] bg-cover bg-[position:42%_center] opacity-[.1] [mask-image:linear-gradient(to_bottom,transparent,black)]" />
-      <div className="absolute inset-x-0 top-0 h-[2px] bg-[linear-gradient(90deg,var(--brand),var(--accent),var(--aqua))]" />
-      <div className="relative flex h-[68px] items-center border-b border-white/10 px-5"><div className="rounded-[8px] bg-white p-1 shadow-[0_8px_24px_rgb(88_107_232_/_24%)]"><BrandMark compact /></div><div className="ml-3 min-w-0"><strong className="block truncate text-[14px]">{branding.name}</strong><span className="text-[10px] text-white/45">{admin ? "运营管理后台" : "开发者控制台"}</span></div></div>
-      <div className="relative px-3 py-4"><button type="button" onClick={() => !admin && setWorkspaceMenu((value) => !value)} className="flex min-h-14 w-full items-center justify-between rounded-[8px] border border-white/10 bg-white/[.06] px-3 py-2.5 text-left transition hover:border-white/20 hover:bg-white/10" aria-expanded={workspaceMenu}><span className="min-w-0"><span className="block truncate text-[12px] font-semibold">{admin ? "平台运营中心" : workspace?.name ?? "暂无工作区"}</span><span className="mt-0.5 block text-[10px] text-white/45">{admin ? "平台管理员" : workspace ? `${workspace.type === "ENTERPRISE" ? "企业" : "个人"}空间 · ${workspace.role}` : "联系管理员创建空间"}</span></span>{!admin && <ChevronDown className="size-3.5 shrink-0 text-white/40" />}</button>
-        {workspaceMenu && !admin && <div className="absolute inset-x-3 top-[76px] z-40 overflow-hidden rounded-[8px] border border-white/10 bg-[var(--night-soft)] shadow-xl">{currentUser.workspaces.map((item) => <button key={item.id} type="button" onClick={() => selectWorkspace(item.id)} className="flex w-full items-center gap-2.5 border-b border-white/10 px-3 py-3 text-left last:border-0 hover:bg-white/5">{item.type === "ENTERPRISE" ? <Building2 className="size-4 shrink-0 text-[#8d9bff]" /> : <UserRound className="size-4 shrink-0 text-[#f18cb4]" />}<span className="min-w-0"><strong className="block truncate text-[11px]">{item.name}</strong><small className="text-[9px] text-white/45">{item.status === "ACTIVE" ? "正常" : "待认证"} · {item.role}</small></span></button>)}</div>}
+  return <TooltipProvider delayDuration={350}><div className="workspace-frame min-h-[100dvh] lg:grid lg:grid-cols-[232px_1fr]">
+    <aside className="workspace-sidebar hidden min-h-[100dvh] overflow-hidden lg:fixed lg:inset-y-0 lg:flex lg:w-[232px] lg:flex-col">
+      <div className="workspace-sidebar-accent" />
+      <div className="workspace-brand-row">
+        <BrandMark compact />
+        <div className="min-w-0"><strong className="block truncate text-[14px]">{branding.name}</strong><span className="mt-0.5 block text-[9px] text-[var(--muted)]">{admin ? "OPERATIONS STUDIO" : "DEVELOPER STUDIO"}</span></div>
       </div>
-      <nav className="relative flex-1 space-y-1 px-3" aria-label={title}>{nav.map((item) => { const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href); const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("group relative flex h-11 items-center gap-3 rounded-[8px] px-3 text-[12px] font-medium text-white/65 transition hover:bg-white/[.06] hover:text-white", active && "bg-white/10 text-white shadow-[inset_0_0_0_1px_rgb(255_255_255_/_6%)]")}><span className={cn("grid size-7 place-items-center rounded-[7px] text-white/45 transition group-hover:text-white", active && "bg-[#8d9bff]/15 text-[#aeb7ff]")}><Icon className="size-4" /></span><span>{item.label}</span>{active && <span className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-[#f18cb4]" />}{item.badge && <span className="ml-auto rounded-full bg-[#f18cb4]/15 px-2 py-0.5 text-[9px] font-semibold text-[#f5a6c5]">{item.badge}</span>}</Link>; })}</nav>
-      <div className="relative border-t border-white/10 p-3"><Link href="/marketplace" className="flex items-center gap-3 rounded-[8px] px-3 py-2.5 text-[11px] text-white/50 hover:bg-white/5 hover:text-white"><Menu className="size-4" /> 返回 API 市场</Link><div className="mt-2 flex items-center gap-2 px-3 py-2"><span className="grid size-8 shrink-0 place-items-center rounded-full bg-[#f18cb4] text-[11px] font-bold text-[#221520]">{initials}</span><div className="min-w-0 flex-1"><strong className="block truncate text-[11px]">{currentUser.name}</strong><span className="block truncate text-[9px] text-white/40">{currentUser.email}</span></div><button type="button" onClick={logout} disabled={loggingOut} className="grid size-8 place-items-center rounded-[7px] text-white/40 hover:bg-white/5 hover:text-white disabled:opacity-40" aria-label="退出登录" title="退出登录"><LogOut className="size-4" /></button></div></div>
+
+      <div className="px-3 pb-3 pt-4">
+        {admin ? <div className="workspace-scope"><span className="workspace-scope-icon"><ShieldCheck /></span><span className="min-w-0"><strong>平台运营中心</strong><small>全局配置与业务治理</small></span><span className="ml-auto size-1.5 rounded-full bg-[var(--success)] shadow-[0_0_0_4px_var(--success-soft)]" /></div> : <DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="workspace-scope w-full text-left"><span className="workspace-scope-icon"><Building2 /></span><span className="min-w-0 flex-1"><strong className="truncate">{workspace?.name ?? "暂无工作区"}</strong><small>{workspace ? `${workspace.type === "ENTERPRISE" ? "企业" : "个人"}空间 · ${workspace.role}` : "等待创建空间"}</small></span><ChevronDown className="size-3.5 text-[var(--muted)]" /></button></DropdownMenuTrigger><DropdownMenuContent side="right" align="start" className="w-64"><DropdownMenuLabel>切换工作区</DropdownMenuLabel>{currentUser.workspaces.map((item) => <DropdownMenuItem key={item.id} onSelect={() => selectWorkspace(item.id)} className="h-auto min-h-11 py-2"><span className={cn("grid size-7 place-items-center rounded-[6px]", item.type === "ENTERPRISE" ? "bg-[var(--brand-soft)] text-[var(--brand)]" : "bg-[var(--accent-soft)] text-[var(--accent)]")}>{item.type === "ENTERPRISE" ? <Building2 /> : <UserRound />}</span><span className="min-w-0 flex-1"><strong className="block truncate text-[10px]">{item.name}</strong><small className="text-[8px] text-[var(--muted)]">{item.status === "ACTIVE" ? "正常" : "待认证"} · {item.role}</small></span>{item.id === workspaceId && <Check className="text-[var(--brand)]" />}</DropdownMenuItem>)}</DropdownMenuContent></DropdownMenu>}
+      </div>
+
+      <div className="workspace-nav-label">工作台</div>
+      <nav className="workspace-nav flex-1" aria-label={title}>{nav.map((item) => {
+        const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
+        const Icon = workspaceIcons[item.icon];
+        return <Link key={item.href} href={item.href} className={cn("workspace-nav-item", active && "is-active")}><span className="workspace-nav-icon"><Icon /></span><span className="min-w-0 flex-1 truncate">{item.label}</span>{item.badge && <Badge variant="accent" className="h-[18px]">{item.badge}</Badge>}</Link>;
+      })}</nav>
+
+      <div className="workspace-sidebar-art" aria-hidden="true" />
+      <div className="workspace-account">
+        <Link href="/marketplace" className="workspace-market-link"><Menu />返回 API 市场</Link>
+        <DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="workspace-account-trigger"><Avatar><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0 flex-1"><strong>{currentUser.name}</strong><small>{currentUser.email}</small></span><ChevronDown /></button></DropdownMenuTrigger><DropdownMenuContent side="right" align="end" className="w-56"><DropdownMenuLabel>{admin ? "管理员账户" : "开发者账户"}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem asChild><Link href="/console/settings"><Settings />账户与企业设置</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/marketplace"><Boxes />API 市场</Link></DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem onSelect={logout} disabled={loggingOut} className="text-[var(--danger)] focus:text-[var(--danger)]"><LogOut />{loggingOut ? "正在退出" : "退出登录"}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+      </div>
     </aside>
 
-    <div className="min-w-0 lg:col-start-2"><header className="workspace-glass sticky top-0 z-30 flex h-[68px] items-center gap-3 border-b border-[var(--line)] px-4 sm:px-6"><div className="rounded-[8px] bg-white p-1 lg:hidden"><BrandMark compact /></div><div><h1 className="text-[16px] font-bold">{title}</h1><p className="hidden text-[10px] text-[var(--muted)] sm:block">{admin ? "平台全局运营与治理" : workspace?.name ?? "开发者工作区"}</p></div>{!admin && workspace && <select value={workspaceId} onChange={(event) => selectWorkspace(event.target.value)} className="ml-auto max-w-36 rounded-[8px] border border-[var(--line)] bg-[var(--surface)] px-2 py-1.5 text-[10px] lg:hidden" aria-label="当前工作区">{currentUser.workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}<div className={cn("flex items-center gap-1", admin ? "ml-auto" : "lg:ml-auto")}><ThemeToggle className="grid size-9 place-items-center rounded-[8px] text-[var(--muted)] hover:bg-[var(--surface-subtle)]" /><button type="button" onClick={logout} disabled={loggingOut} className="grid size-9 place-items-center rounded-[8px] text-[var(--muted)] hover:bg-[var(--surface-subtle)] lg:hidden" aria-label="退出登录"><LogOut className="size-4" /></button></div></header>
-      <nav className="flex gap-1 overflow-x-auto border-b border-[var(--line)] bg-[var(--surface)] px-3 py-2 lg:hidden" aria-label="移动端控制台导航">{nav.map((item) => { const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href); const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("flex shrink-0 items-center gap-1.5 rounded-[8px] px-3 py-2 text-[10px] text-[var(--muted)]", active && "bg-[var(--night)] text-white")}><Icon className="size-3.5" />{item.label}{item.badge && <span className="rounded-full bg-[var(--accent-soft)] px-1.5 text-[8px] text-[var(--accent)]">{item.badge}</span>}</Link>; })}</nav><main className="p-4 sm:p-6 xl:p-8">{children}</main>
+    <div className="min-w-0 lg:col-start-2">
+      <header className="workspace-topbar sticky top-0 z-30">
+        <div className="rounded-[7px] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-xs)] lg:hidden"><BrandMark compact /></div>
+        <div className="min-w-0"><span className="block text-[9px] font-semibold text-[var(--accent-strong)]">{admin ? "STAR OPERATIONS" : workspace?.name ?? "STAR WORKSPACE"}</span><h1 className="truncate text-[16px] font-bold">{title}</h1></div>
+        {!admin && workspace && <Select value={workspaceId} onValueChange={selectWorkspace}><SelectTrigger size="sm" className="ml-auto w-28 shrink-0 lg:hidden" aria-label="当前工作区"><SelectValue /></SelectTrigger><SelectContent>{currentUser.workspaces.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>}
+        <div className={cn("flex items-center gap-1", admin ? "ml-auto" : "lg:ml-auto")}><span className="mr-2 hidden items-center gap-2 text-[9px] text-[var(--muted)] sm:flex"><span className="size-1.5 rounded-full bg-[var(--success)]" />服务在线</span><Tooltip><TooltipTrigger asChild><ThemeToggle className="grid size-9 place-items-center rounded-[7px] text-[var(--muted)] transition hover:bg-[var(--surface-subtle)] hover:text-[var(--ink)]" /></TooltipTrigger><TooltipContent>切换深浅色模式</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" onClick={logout} disabled={loggingOut} className="lg:hidden" aria-label="退出登录"><LogOut /></Button></TooltipTrigger><TooltipContent>退出登录</TooltipContent></Tooltip></div>
+      </header>
+      <nav className="workspace-mobile-nav lg:hidden" aria-label="移动端控制台导航">{nav.map((item) => { const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href); const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("workspace-mobile-item", active && "is-active")}><Icon />{item.label}{item.badge && <Badge variant="accent" className="h-4 px-1.5 text-[8px]">{item.badge}</Badge>}</Link>; })}</nav>
+      <main className="workspace-content">{children}</main>
     </div>
-  </div>;
+  </div></TooltipProvider>;
 }

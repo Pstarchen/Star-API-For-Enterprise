@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Building2, CircleGauge, Code2, Network, ShieldCheck, Sparkles, UserRound } from "lucide-react";
+import { ArrowRight, Building2, CircleGauge, Code2, KeyRound, Network, Route, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { connection } from "next/server";
 import { ApiMarketplace } from "@/components/api-marketplace";
 import { PortalShell } from "@/components/portal-shell";
+import { Button } from "@/components/ui/button";
 import { listCatalogProducts } from "@/lib/server/catalog";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
@@ -14,9 +15,38 @@ export default async function Home() {
   ]);
   const successRate = calls ? `${((successes / calls) * 100).toFixed(2)}%` : "暂无";
   const averageLatency = latency._avg.latencyMs == null ? "暂无" : `${Math.round(latency._avg.latencyMs)} ms`;
-  const metrics = [{ value: users.toLocaleString("zh-CN"), label: "注册用户", icon: UserRound }, { value: calls.toLocaleString("zh-CN"), label: "累计真实调用", icon: Network }, { value: successRate, label: "真实调用成功率", icon: ShieldCheck }, { value: publishedApis.toLocaleString("zh-CN"), label: "已发布 API", icon: CircleGauge }];
-  return <PortalShell><section className="anime-hero min-h-[570px] border-b border-[var(--line)]"><div className="container-shell grid min-h-[570px] items-end pb-10 pt-44 sm:items-center sm:py-14 lg:grid-cols-2"><div className="hidden lg:block" aria-hidden="true" /><div className="lg:pl-12"><div className="flex items-center gap-2 text-[11px] font-semibold text-[var(--brand)]"><Sparkles className="size-3.5 text-[var(--accent)]" />面向个人开发者与企业团队</div><h1 className="text-balance mt-4 max-w-2xl text-[34px] font-bold leading-[1.18] sm:text-[44px]">{platform.name}</h1><p className="mt-4 max-w-xl text-[14px] leading-7 text-[var(--muted)]">{platform.description}</p><div className="mt-7 flex flex-wrap gap-3"><Link href="/register" className="luminous-button inline-flex h-11 items-center gap-2 rounded-[7px] bg-[var(--brand)] px-5 text-[12px] font-semibold text-white">免费注册 <ArrowRight className="size-3.5" /></Link><Link href="/marketplace" className="inline-flex h-11 items-center gap-2 rounded-[7px] border border-[var(--line-strong)] bg-[var(--surface-glass)] px-5 text-[12px] font-semibold"><Code2 className="size-3.5" />浏览 API</Link></div><div className="mt-8 grid max-w-xl grid-cols-3 gap-2"><HeroStat label="AVG LATENCY" value={averageLatency} /><HeroStat label="SUCCESS" value={successRate} /><HeroStat label="PUBLISHED" value={publishedApis.toLocaleString("zh-CN")} /></div></div></div></section><section className="border-b border-[var(--line)] bg-[var(--surface)]"><div className="container-shell grid grid-cols-2 divide-x divide-y divide-[var(--line)] sm:grid-cols-4 sm:divide-y-0">{metrics.map((metric) => <div key={metric.label} className="flex min-h-28 items-center gap-3 px-3 py-5 sm:px-5"><metric.icon className="hidden size-5 text-[var(--aqua)] xl:block" /><div><strong className="block text-xl font-bold">{metric.value}</strong><span className="mt-1 block text-[11px] text-[var(--muted)]">{metric.label}</span></div></div>)}</div></section><section className="border-b border-[var(--line)] bg-[var(--surface)]"><div className="container-shell grid lg:grid-cols-2"><Audience icon={UserRound} eyebrow="PERSONAL" title="个人开发者" text="独立应用、密钥、真实调用日志与按接口计费。" /><Audience icon={Building2} eyebrow="ENTERPRISE" title="企业团队" text="组织成员、角色权限、统一账单与完整审计。" enterprise /></div></section><ApiMarketplace products={products} /><footer className="border-t border-[var(--line)] bg-[var(--surface)] py-8"><div className="container-shell flex flex-col gap-3 text-[11px] text-[var(--muted)] sm:flex-row sm:justify-between"><span>© 2026 {platform.name} · API 开放分发平台</span><div className="flex gap-5"><Link href="/pricing">接口价格</Link><Link href="/docs">接入文档</Link><Link href="/admin">平台管理</Link></div></div></footer></PortalShell>;
+  const metrics = [
+    { value: users.toLocaleString("zh-CN"), label: "注册用户", note: "个人与企业账号", icon: UserRound },
+    { value: calls.toLocaleString("zh-CN"), label: "累计调用", note: "真实网关请求", icon: Network },
+    { value: successRate, label: "调用成功率", note: `平均响应 ${averageLatency}`, icon: ShieldCheck },
+    { value: publishedApis.toLocaleString("zh-CN"), label: "开放 API", note: "当前已发布", icon: CircleGauge },
+  ];
+
+  return <PortalShell>
+    <section className="home-hero-scene">
+      <div className="container-shell home-hero-inner">
+        <div className="home-hero-copy">
+          <div className="home-kicker"><Sparkles />API OPEN DISTRIBUTION</div>
+          <h1>{platform.name}</h1>
+          <p>{platform.description}</p>
+          <div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg"><Link href="/register">开始接入<ArrowRight /></Link></Button><Button asChild variant="secondary" size="lg" className="bg-white/90"><Link href="/marketplace"><Code2 />浏览 API</Link></Button></div>
+          <div className="home-route-line"><span><Route />统一网关</span><span><KeyRound />密钥鉴权</span><span><CircleGauge />计量计费</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section className="home-metric-band"><div className="container-shell grid grid-cols-2 lg:grid-cols-4">{metrics.map((metric) => <div key={metric.label} className="home-metric"><metric.icon /><div><strong>{metric.value}</strong><span>{metric.label}</span><small>{metric.note}</small></div></div>)}</div></section>
+
+    <section className="home-audience"><div className="container-shell grid lg:grid-cols-[1fr_1fr]">
+      <Audience icon={UserRound} index="PERSONAL" title="个人开发者" text="从第一枚密钥到调用日志与按量计费，用一个工作区管理独立应用。" points={["应用与密钥隔离", "真实调用日志", "接口级订阅与费用"]} />
+      <Audience icon={Building2} index="ENTERPRISE" title="企业团队" text="围绕组织、权限、账单和审计建立可追踪的 API 使用体系。" points={["成员与角色治理", "统一账单和配额", "操作与调用审计"]} enterprise />
+    </div></section>
+
+    <ApiMarketplace products={products} />
+    <footer className="border-t border-[var(--line)] bg-[var(--surface)] py-8"><div className="container-shell flex flex-col gap-3 text-[11px] text-[var(--muted)] sm:flex-row sm:justify-between"><span>© 2026 {platform.name} · API 开放分发平台</span><div className="flex gap-5"><Link href="/pricing">接口价格</Link><Link href="/docs">接入文档</Link><Link href="/admin">平台管理</Link></div></div></footer>
+  </PortalShell>;
 }
 
-function HeroStat({ label, value }: { label: string; value: string }) { return <div className="liquid-glass liquid-stat rounded-[7px] p-3"><span className="mono text-[8px] text-white/45">{label}</span><strong className="mt-1 block text-sm">{value}</strong></div>; }
-function Audience({ icon: Icon, eyebrow, title, text, enterprise = false }: { icon: typeof UserRound; eyebrow: string; title: string; text: string; enterprise?: boolean }) { return <div className={`flex gap-4 py-7 ${enterprise ? "lg:pl-10" : "border-b border-[var(--line)] lg:border-b-0 lg:border-r lg:pr-10"}`}><span className="grid size-10 shrink-0 place-items-center rounded-[6px] bg-[var(--brand-soft)]"><Icon className="size-5 text-[var(--brand)]" /></span><div><p className="eyebrow">{eyebrow}</p><h2 className="mt-1 text-[15px] font-bold">{title}</h2><p className="mt-2 text-[11px] text-[var(--muted)]">{text}</p><Link href="/register" className="mt-3 inline-flex items-center gap-1 text-[10px] font-semibold text-[var(--brand)]">创建账号 <ArrowRight className="size-3" /></Link></div></div>; }
+function Audience({ icon: Icon, index, title, text, points, enterprise = false }: { icon: typeof UserRound; index: string; title: string; text: string; points: string[]; enterprise?: boolean }) {
+  return <article className={`home-audience-item ${enterprise ? "is-enterprise" : ""}`}><div className="home-audience-heading"><span><Icon /></span><small>{index}</small></div><h2>{title}</h2><p>{text}</p><ul>{points.map((point) => <li key={point}><ShieldCheck />{point}</li>)}</ul><Link href="/register">创建{enterprise ? "企业" : "个人"}账号<ArrowRight /></Link></article>;
+}

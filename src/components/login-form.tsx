@@ -4,6 +4,10 @@ import Link from "next/link";
 import { Eye, EyeOff, GitBranch as Github, Loader2 } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Button } from "./ui/button";
+import { Checkbox } from "./ui/checkbox";
+import { FormField, FormLabel, FormMessage } from "./ui/form-field";
+import { Input, InputGroup } from "./ui/input";
 
 const oauthMessages: Record<string, string> = {
   github_invalid_callback: "GitHub 回调参数不完整",
@@ -52,5 +56,17 @@ export function LoginForm({ passwordLoginEnabled, registrationEnabled, githubEna
     }
   }
 
-  return <div className="space-y-4">{githubEnabled && <><Link href="/api/v1/auth/github" className="flex h-11 w-full items-center justify-center gap-2 rounded-[6px] border border-[var(--line-strong)] bg-[var(--surface)] text-[11px] font-semibold hover:bg-[var(--surface-subtle)]"><Github className="size-4" />使用 GitHub 登录</Link>{passwordLoginEnabled && <div className="flex items-center gap-3 text-[9px] text-[var(--muted)]"><span className="h-px flex-1 bg-[var(--line)]" />或使用邮箱密码<span className="h-px flex-1 bg-[var(--line)]" /></div>}</>}{passwordLoginEnabled && <form onSubmit={submit} className="space-y-4"><label className="block"><span className="mb-1.5 block text-[10px] font-semibold">邮箱</span><input name="email" required type="email" autoComplete="email" placeholder="name@example.com" className="h-11 w-full rounded-[6px] border border-[var(--line)] px-3 text-[12px] outline-none focus:border-[var(--brand)]" /></label><label className="block"><span className="mb-1.5 block text-[10px] font-semibold">密码</span><span className="flex h-11 items-center rounded-[6px] border border-[var(--line)] focus-within:border-[var(--brand)]"><input name="password" required maxLength={72} type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="输入密码" className="min-w-0 flex-1 px-3 text-[12px] outline-none" /><button type="button" onClick={() => setShowPassword((value) => !value)} className="grid size-10 place-items-center text-[var(--muted)]" aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</button></span></label><label className="flex items-center gap-2 text-[10px] text-[var(--muted)]"><input name="remember" type="checkbox" className="size-3.5 accent-[var(--brand)]" />保持登录 30 天</label>{(error || oauthError) && <p role="alert" className="rounded-[6px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error || oauthMessages[oauthError ?? ""] || "第三方登录失败"}</p>}<button type="submit" disabled={loading} className="flex h-11 w-full items-center justify-center gap-2 rounded-[6px] bg-[var(--brand)] text-[11px] font-semibold text-white disabled:opacity-60">{loading && <Loader2 className="size-4 animate-spin" />}{loading ? "正在登录" : "登录"}</button>{registrationEnabled && <p className="text-center text-[10px] text-[var(--muted)]">还没有账号？ <Link href="/register" className="font-semibold text-[var(--brand)]">免费注册</Link></p>}</form>}{!passwordLoginEnabled && !githubEnabled && <p role="alert" className="rounded-[6px] bg-[var(--danger-soft)] px-3 py-3 text-[10px] text-[var(--danger)]">平台暂时没有可用的登录方式，请联系管理员。</p>}{!passwordLoginEnabled && oauthError && <p role="alert" className="rounded-[6px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{oauthMessages[oauthError] || "第三方登录失败"}</p>}</div>;
+  return <div className="space-y-4">
+    {githubEnabled && <><Button asChild variant="secondary" size="lg" className="w-full"><Link href="/api/v1/auth/github"><Github />使用 GitHub 登录</Link></Button>{passwordLoginEnabled && <div className="flex items-center gap-3 text-[9px] text-[var(--muted)]"><span className="h-px flex-1 bg-[var(--line)]" />或使用邮箱密码<span className="h-px flex-1 bg-[var(--line)]" /></div>}</>}
+    {passwordLoginEnabled && <form onSubmit={submit} className="space-y-4">
+      <FormField><FormLabel>邮箱</FormLabel><Input name="email" required type="email" autoComplete="email" placeholder="name@example.com" className="h-11 text-[12px]" /></FormField>
+      <FormField><FormLabel>密码</FormLabel><InputGroup className="h-11"><Input name="password" required maxLength={72} type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="输入密码" className="text-[12px]" /><Button type="button" variant="ghost" size="icon" onClick={() => setShowPassword((value) => !value)} className="mr-1 shrink-0" aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</Button></InputGroup></FormField>
+      <label className="flex items-center gap-2 text-[10px] text-[var(--muted)]"><Checkbox name="remember" />保持登录 30 天</label>
+      {(error || oauthError) && <FormMessage>{error || oauthMessages[oauthError ?? ""] || "第三方登录失败"}</FormMessage>}
+      <Button type="submit" size="lg" disabled={loading} className="w-full">{loading && <Loader2 className="animate-spin" />}{loading ? "正在登录" : "登录"}</Button>
+      {registrationEnabled && <p className="text-center text-[10px] text-[var(--muted)]">还没有账号？ <Link href="/register" className="font-semibold text-[var(--brand)] hover:text-[var(--brand-strong)]">免费注册</Link></p>}
+    </form>}
+    {!passwordLoginEnabled && !githubEnabled && <FormMessage>平台暂时没有可用的登录方式，请联系管理员。</FormMessage>}
+    {!passwordLoginEnabled && oauthError && <FormMessage>{oauthMessages[oauthError] || "第三方登录失败"}</FormMessage>}
+  </div>;
 }
