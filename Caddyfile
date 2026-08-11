@@ -1,4 +1,4 @@
-{$SITE_ADDRESS} {
+{$SITE_ADDRESS}, http://127.0.0.1 {
   encode zstd gzip
   reverse_proxy app:3000
 
