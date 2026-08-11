@@ -239,6 +239,18 @@ async function main() {
 
   for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
+  response = await request("/docs");
+  const docsHtml = await response.text();
+  expectStatus(response.status, 200, "documentation uses public gateway URL", docsHtml);
+  assert.ok(docsHtml.includes(`${apiUrl}/`), "documentation must use the configured gateway domain");
+  assert.ok(!docsHtml.includes("/api/v1/gateway/"), "documentation must not add a legacy API prefix");
+
+  response = await request(`/apis/${staticSlug}`);
+  const detailHtml = await response.text();
+  expectStatus(response.status, 200, "API detail uses direct public route", detailHtml);
+  assert.ok(detailHtml.includes(`${apiUrl}/${staticSlug}`), "API detail must use the gateway domain plus public path");
+  assert.ok(!detailHtml.includes("/api/v1/gateway/"), "API detail must not add a legacy API prefix");
+
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "E2E Test App", environment: "TEST" } }, personalCookie);
   expectStatus(result.response.status, 201, "create application and API key", result.body);
   const appId = result.body.data.app.id;

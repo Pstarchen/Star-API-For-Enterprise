@@ -32,6 +32,17 @@ export function normalizePublicPath(value: string) {
   return collapsed.replace(/\/+$/, "") || "/";
 }
 
+export function buildPublicApiUrl(input: { configuredBaseUrl?: string; platformUrl: string; publicHost: string; publicPath: string }) {
+  let baseUrl = input.configuredBaseUrl?.trim().replace(/\/+$/, "");
+  if (!baseUrl) {
+    let protocol = "https:";
+    try { protocol = new URL(input.platformUrl).protocol; } catch { /* Use HTTPS when the platform URL is unavailable. */ }
+    baseUrl = `${protocol}//${normalizePublicHost(input.publicHost)}`;
+  }
+  const publicPath = normalizePublicPath(input.publicPath);
+  return publicPath === "/" ? `${baseUrl}/` : `${baseUrl}${publicPath}`;
+}
+
 export function routePatternKey(value: string) {
   return normalizePublicPath(value)
     .split("/")
