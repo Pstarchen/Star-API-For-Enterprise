@@ -215,8 +215,8 @@ async function main() {
   expectStatus(response.status, 201, "minimal quick API creation", quickBody);
   const quickApi = quickBody.data;
   assert.match(quickApi.slug, /^api-[a-z0-9]{6}(?:-\d+)?$/);
-  assert.equal(quickApi.endpoint, `/${quickApi.slug}`);
-  assert.equal(quickApi.publicHost, new URL(apiUrl).hostname);
+  assert.equal(quickApi.endpoint, `/api/${quickApi.slug}`);
+  assert.equal(quickApi.publicHost, new URL(portalUrl).hostname);
 
   result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: staticApi.publicHost, path: staticApi.endpoint, version: "v1", method: "GET", slug: staticApi.slug })}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "route preflight detects conflict", result.body);
@@ -245,13 +245,13 @@ async function main() {
   const adminApiKey = result.body.data.secret;
   assert.match(adminApiKey, /^sk_test_/);
   await subscribe(adminCookie, adminAppId, quickApi.id, `admin-${quickApi.slug}`);
-  response = await request(`/${quickApi.slug}`, { headers: { Authorization: `Bearer ${adminApiKey}` } }, "", apiUrl);
+  response = await request(quickApi.endpoint, { headers: { Authorization: `Bearer ${adminApiKey}` } });
   expectStatus(response.status, 200, "administrator API key gateway call", await response.text());
 
   response = await request("/docs");
   const docsHtml = await response.text();
   expectStatus(response.status, 200, "documentation uses public gateway URL", docsHtml);
-  assert.ok(docsHtml.includes(`${apiUrl}/`), "documentation must use the configured gateway domain");
+  assert.ok(docsHtml.includes(`${portalUrl}/api/`), "documentation must use the platform domain and /api prefix for default routes");
   assert.ok(!docsHtml.includes("/api/v1/gateway/"), "documentation must not add a legacy API prefix");
 
   response = await request(`/apis/${staticSlug}`);
@@ -293,7 +293,7 @@ async function main() {
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
   response = await request("/LICENSE", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "tunnel upstream gateway call", await response.text());
-  response = await request(`/${quickApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(quickApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "quick-created API gateway call", await response.text());
   response = await request(`/${textApi.slug}`, { headers: { Authorization: "Bearer invalid-key" } }, "", apiUrl);
   expectStatus(response.status, 401, "invalid API key rejected", await response.text());
@@ -303,6 +303,18 @@ async function main() {
   assert.ok(result.body.data.totalCalls >= callsBefore + 9, "successful gateway calls must increase total statistics");
   assert.ok(result.body.data.todayCalls >= callsBefore + 9, "successful gateway calls must increase today's statistics");
   assert.ok(result.body.data.daily.reduce((sum, point) => sum + point.success + point.failed, 0) >= 9, "seven-day series must contain gateway calls");
+
+  const removableApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Removable API Smoke", slug: `removable-${runId}`, content: JSON.stringify({ removable: true }) });
+  await publishApi(adminCookie, removableApi);
+  await subscribe(adminCookie, adminAppId, removableApi.id, removableApi.slug);
+  response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(removableApi.id)}`, { method: "DELETE" }, adminCookie);
+  expectStatus(response.status, 409, "published subscribed API cannot be deleted", await response.text());
+  result = await jsonRequest("/api/v1/admin/apis", { method: "PATCH", body: { id: removableApi.id, status: "OFFLINE" } }, adminCookie);
+  expectStatus(result.response.status, 200, "subscribed API can be taken offline", result.body);
+  response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(removableApi.id)}`, { method: "DELETE" }, adminCookie);
+  expectStatus(response.status, 200, "offline API deletion cancels subscriptions", await response.text());
+  response = await request(`/apis/${removableApi.slug}`);
+  expectStatus(response.status, 404, "deleted API is removed from catalog", await response.text());
 
   const providerApi = await createApi(enterpriseCookie, { sourceType: "STATIC_JSON", name: "Provider Review Smoke", slug: `provider-${runId}`, content: JSON.stringify({ provider: true }) });
   result = await jsonRequest("/api/v1/admin/apis", { method: "PATCH", body: { id: providerApi.id, status: "REVIEW" } }, enterpriseCookie);

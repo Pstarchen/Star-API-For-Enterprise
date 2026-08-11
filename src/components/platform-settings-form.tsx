@@ -118,7 +118,7 @@ export function PlatformSettingsForm({ config }: { config: PlatformConfig }) {
           </label>
           <label className="block sm:col-span-2">
             <span className="mb-1.5 block text-[10px] font-semibold">公开访问地址</span>
-            <input name="publicUrl" required type="url" defaultValue={config.publicUrl} placeholder="https://api.example.com" className={inputClass} />
+            <input name="publicUrl" required type="url" defaultValue={config.publicUrl} placeholder="https://example.com" className={inputClass} />
             <small className="mt-1.5 block text-[9px] text-[var(--muted)]">填写用户实际访问的平台根地址，生产环境建议使用 HTTPS。</small>
           </label>
         </div>

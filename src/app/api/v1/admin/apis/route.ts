@@ -1,7 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { apiSlugFromName, normalizePublicHost, normalizePublicPath } from "@/lib/api-routes";
+import { apiSlugFromName, normalizePublicHost, normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
 import { apiCategories } from "@/lib/catalog";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId, type ContentHandlerId } from "@/lib/internal-handlers";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
@@ -124,15 +124,16 @@ async function requestInput(request: Request) {
   const name = typeof supplied.name === "string" ? supplied.name.trim() : "";
   const hasExplicitSlug = typeof supplied.slug === "string" && supplied.slug.trim().length > 0;
   const slug = hasExplicitSlug ? String(supplied.slug).trim() : await generatedSlug(name);
-  const publicPath = normalizePublicPath(typeof supplied.publicPath === "string" && supplied.publicPath.trim() ? supplied.publicPath : `/${slug}`);
+  const platform = await getPlatformConfig();
+  const publicPath = normalizePublicPath(typeof supplied.publicPath === "string" && supplied.publicPath.trim() ? supplied.publicPath : `/api/${slug}`);
   const config = {
-    publicHost: process.env.API_PUBLIC_HOST ?? "api.localhost",
+    publicHost: publicHostFromUrl(platform.publicUrl, process.env.API_PUBLIC_HOST ?? "localhost"),
     version: "v1",
     visibility: "PUBLIC",
     method: "GET",
     requestFormat: "JSON",
     corsEnabled: true,
-    forceHttps: (process.env.API_PUBLIC_URL ?? "https://api.localhost").startsWith("https://"),
+    forceHttps: platform.publicUrl.startsWith("https://"),
     requestLogging: true,
     billingMode: "FREE",
     defaultQpsLimit: 10,
@@ -140,7 +141,7 @@ async function requestInput(request: Request) {
     name,
     slug,
     publicPath,
-    path: typeof supplied.path === "string" && supplied.path.trim() ? normalizePublicPath(supplied.path) : publicPath,
+    path: typeof supplied.path === "string" && supplied.path.trim() ? normalizePublicPath(supplied.path) : `/${slug}`,
   };
   const parsed = createSchema.safeParse(config);
   const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
@@ -282,12 +283,12 @@ export async function DELETE(request: Request) {
   const existing = await prisma.apiProduct.findUnique({ where: { id }, include: { provider: true, _count: { select: { subscriptions: true } } } });
   if (!existing) return Response.json({ code: 404, message: "API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && existing.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权删除其他服务商的 API" }, { status: 403, headers: noStoreHeaders });
-  if (!auth.isAdmin && !["DRAFT", "OFFLINE"].includes(existing.status)) return Response.json({ code: 409, message: "审核中或已发布的 API 不能由服务商直接删除" }, { status: 409, headers: noStoreHeaders });
-  if (existing._count.subscriptions) return Response.json({ code: 409, message: "已有应用订阅该 API，请先下线并处理订阅" }, { status: 409, headers: noStoreHeaders });
+  if (!["DRAFT", "OFFLINE"].includes(existing.status)) return Response.json({ code: 409, message: "请先将 API 下线，再执行删除" }, { status: 409, headers: noStoreHeaders });
   await prisma.$transaction([
+    prisma.subscription.deleteMany({ where: { productId: id } }),
     prisma.apiProduct.delete({ where: { id } }),
-    prisma.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.delete", resource: "api-product", resourceId: id, metadata: { slug: existing.slug }, ipAddress: requestIp(request) } }),
+    prisma.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.delete", resource: "api-product", resourceId: id, metadata: { slug: existing.slug, cancelledSubscriptions: existing._count.subscriptions }, ipAddress: requestIp(request) } }),
   ]);
   revalidatePath("/", "layout");
-  return Response.json({ code: 200, message: "API 已删除" }, { headers: noStoreHeaders });
+  return Response.json({ code: 200, message: existing._count.subscriptions ? `API 已删除，同时取消 ${existing._count.subscriptions} 个应用订阅` : "API 已删除" }, { headers: noStoreHeaders });
 }

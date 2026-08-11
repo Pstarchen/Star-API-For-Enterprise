@@ -32,13 +32,22 @@ export function normalizePublicPath(value: string) {
   return collapsed.replace(/\/+$/, "") || "/";
 }
 
+export function publicHostFromUrl(value: string, fallback = "localhost") {
+  try { return normalizePublicHost(new URL(value).hostname); }
+  catch { return normalizePublicHost(fallback); }
+}
+
 export function buildPublicApiUrl(input: { configuredBaseUrl?: string; platformUrl: string; publicHost: string; publicPath: string }) {
-  let baseUrl = input.configuredBaseUrl?.trim().replace(/\/+$/, "");
-  if (!baseUrl) {
-    let protocol = "https:";
-    try { protocol = new URL(input.platformUrl).protocol; } catch { /* Use HTTPS when the platform URL is unavailable. */ }
-    baseUrl = `${protocol}//${normalizePublicHost(input.publicHost)}`;
-  }
+  const publicHost = normalizePublicHost(input.publicHost);
+  let platform: URL | null = null;
+  try { platform = new URL(input.platformUrl); } catch { /* Use the configured gateway or HTTPS fallback. */ }
+  let configured: URL | null = null;
+  try { configured = input.configuredBaseUrl ? new URL(input.configuredBaseUrl) : null; } catch { /* Ignore an invalid optional override. */ }
+  const baseUrl = platform && normalizePublicHost(platform.hostname) === publicHost
+    ? platform.origin
+    : configured && normalizePublicHost(configured.hostname) === publicHost
+      ? configured.origin
+      : `${platform?.protocol ?? "https:"}//${publicHost}`;
   const publicPath = normalizePublicPath(input.publicPath);
   return publicPath === "/" ? `${baseUrl}/` : `${baseUrl}${publicPath}`;
 }

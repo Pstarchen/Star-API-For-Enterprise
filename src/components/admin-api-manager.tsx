@@ -2,7 +2,7 @@
 
 import { Boxes, Braces, CheckCircle2, ChevronDown, CircleAlert, Download, FileCode2, FileImage, Globe2, ImagePlus, Library, Link2, Loader2, Plus, Search, Settings2, ShieldCheck, Trash2, Type, Upload, WandSparkles, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { apiSlugFromName, normalizePublicPath } from "@/lib/api-routes";
+import { apiSlugFromName, buildPublicApiUrl, normalizePublicPath } from "@/lib/api-routes";
 import { apiCategories, type CatalogProduct } from "@/lib/catalog";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId } from "@/lib/internal-handlers";
 import { ApiConfigManager } from "@/components/api-config-manager";
@@ -32,7 +32,7 @@ const sourceOptions = [
   { id: "BUILTIN", name: "内置工具", description: "时间、UUID、摘要和文本转换等工具", icon: WandSparkles, tone: "bg-[var(--surface-subtle)] text-[var(--ink)]" },
 ] as const;
 
-export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = true }: { initialApis: CatalogProduct[]; defaultPublicHost: string; canPublish?: boolean }) {
+export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicUrl, canPublish = true }: { initialApis: CatalogProduct[]; defaultPublicHost: string; defaultPublicUrl: string; canPublish?: boolean }) {
   const [apis, setApis] = useState(initialApis);
   const [query, setQuery] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -79,10 +79,10 @@ export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = t
       providerEmail: value("providerEmail"),
       version: value("version") || "v1",
       publicHost: value("publicHost"),
-      publicPath: value("publicPath") || `/${value("slug")}`,
+      publicPath: value("publicPath") || `/api/${value("slug")}`,
       visibility: value("visibility") || "PUBLIC",
       method,
-      path: value("publicPath") || `/${value("slug")}`,
+      path: value("upstreamPath") || `/${value("slug")}`,
       requestFormat: value("requestFormat") || "JSON",
       summary: "",
       internalHandler: sourceType === "BUILTIN" ? builtinHandler : undefined,
@@ -136,12 +136,12 @@ export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = t
   }
 
   async function deleteApi(api: CatalogProduct) {
-    if (!window.confirm(`确认删除“${api.name}”？该操作不可撤销。`)) return;
+    if (!window.confirm(`确认删除“${api.name}”？已下线 API 的应用订阅将同时取消，该操作不可撤销。`)) return;
     const response = await fetch(`/api/v1/admin/apis?id=${encodeURIComponent(api.id)}`, { method: "DELETE" });
     const result = await response.json();
     if (!response.ok) { setError(result.message ?? "删除失败"); return; }
     setApis((current) => current.filter((item) => item.id !== api.id));
-    setNotice(`${api.name} 已删除`);
+    setNotice(result.message || `${api.name} 已删除`);
   }
 
   function exportApis() {
@@ -158,7 +158,7 @@ export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = t
     <section className="panel overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 sm:flex-row"><label className="relative flex-1 sm:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-3.5 -translate-y-1/2 text-[var(--muted)]" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 pl-9 text-[10px]" placeholder="名称、标识、服务商或分类" /></label><Button onClick={exportApis} disabled={!filtered.length} variant="secondary" size="sm"><Download />导出</Button></div>
       <TableContainer><Table className="min-w-[1080px]"><TableHeader><TableRow className="hover:bg-transparent"><TableHead className="px-4">API</TableHead><TableHead className="px-4">公开端点</TableHead><TableHead className="px-4">来源</TableHead><TableHead className="px-4">计费</TableHead><TableHead className="px-4">真实调用</TableHead><TableHead className="px-4">状态</TableHead><TableHead className="px-4 text-right">操作</TableHead></TableRow></TableHeader><TableBody>{filtered.map((api) => <TableRow key={api.id}>
             <TableCell className="px-4"><strong className="block">{api.name}</strong><small className="text-[8px] text-[var(--muted)]">{api.provider} · {api.slug}</small></TableCell>
-            <TableCell className="px-4"><strong className="text-[var(--brand)]">{api.method}</strong><code className="mono ml-2 text-[9px]">{api.publicHost}{api.endpoint}</code></TableCell>
+            <TableCell className="px-4"><strong className="text-[var(--brand)]">{api.method}</strong><code className="mono ml-2 text-[9px]">{buildPublicApiUrl({ platformUrl: defaultPublicUrl, publicHost: api.publicHost, publicPath: api.endpoint })}</code></TableCell>
             <TableCell className="px-4"><span className="block">{executionLabel(api)}</span>{isAssetBackedHandler(api.internalHandler) && <span className="mt-1 block text-[8px] text-[var(--muted)]">{api.assetCount} 个文件/内容项</span>}</TableCell>
             <TableCell className="px-4">{api.price}</TableCell><TableCell className="px-4"><strong className="block text-[11px]">{api.calls.toLocaleString("zh-CN")} 次</strong><span className="mt-1 block text-[8px] text-[var(--muted)]">今日 {api.todayCalls.toLocaleString("zh-CN")} · {api.uptime == null ? "暂无成功率" : `${api.uptime}% 成功`} · {api.latency == null ? "暂无延迟" : `${api.latency} ms`}</span></TableCell>
             <TableCell className="px-4"><Select value={api.status} onValueChange={(value) => changeStatus(api, value as CatalogProduct["status"])}><SelectTrigger size="sm" className="w-24"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="DRAFT">草稿</SelectItem><SelectItem value="REVIEW">审核中</SelectItem>{canPublish && <><SelectItem value="GRAY">灰度中</SelectItem><SelectItem value="PUBLISHED">已发布</SelectItem><SelectItem value="DEPRECATED">已弃用</SelectItem></>}<SelectItem value="OFFLINE">已下线</SelectItem></SelectContent></Select></TableCell>
@@ -167,7 +167,7 @@ export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = t
       {!filtered.length && <EmptyState icon={Boxes} title="暂无 API" description="可以从随机图片、文本、JSON 或外部接口开始创建。" />}
       <div className="border-t border-[var(--line)] px-4 py-3 text-[9px] text-[var(--muted)]">共 {filtered.length} 条真实记录</div>
     </section>
-    {dialogOpen && <CreateDialog canPublish={canPublish} defaultPublicHost={defaultPublicHost} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
+    {dialogOpen && <CreateDialog canPublish={canPublish} defaultPublicHost={defaultPublicHost} defaultPublicUrl={defaultPublicUrl} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
     {contentApi && <ContentManager api={contentApi} close={() => setContentApi(null)} changed={(count) => setApis((items) => items.map((item) => item.id === contentApi.id ? { ...item, assetCount: count } : item))} />}
     {configApi && <ApiConfigManager api={configApi} close={() => setConfigApi(null)} updated={(next) => { setApis((items) => items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items]); setConfigApi(next); }} />}
     {importOpen && <OpenApiImportDialog defaultPublicHost={defaultPublicHost} close={() => setImportOpen(false)} imported={(next, message) => { setApis((items) => [next, ...items]); setNotice(message); setImportOpen(false); }} />}
@@ -176,12 +176,12 @@ export function AdminApiManager({ initialApis, defaultPublicHost, canPublish = t
 
 type RouteCheckState = { status: "idle" | "checking" | "available" | "conflict" | "error"; message: string };
 
-function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
+function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; defaultPublicUrl: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
   const [mode, setMode] = useState<"quick" | "full">("quick");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [publicHost, setPublicHost] = useState(props.defaultPublicHost);
-  const [publicPath, setPublicPath] = useState("/");
+  const [publicPath, setPublicPath] = useState("/api");
   const [version, setVersion] = useState("v1");
   const [slugEdited, setSlugEdited] = useState(false);
   const [pathEdited, setPathEdited] = useState(false);
@@ -195,14 +195,14 @@ function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; s
     if (slugEdited) return;
     const nextSlug = nextName.trim() ? apiSlugFromName(nextName) : "";
     setSlug(nextSlug);
-    if (!pathEdited) setPublicPath(nextSlug ? `/${nextSlug}` : "/");
+    if (!pathEdited) setPublicPath(nextSlug ? `/api/${nextSlug}` : "/api");
   }
 
   function changeSlug(nextSlug: string) {
     const normalized = nextSlug.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/-{2,}/g, "-").replace(/^-/, "");
     setSlugEdited(true);
     setSlug(normalized);
-    if (!pathEdited) setPublicPath(normalized ? `/${normalized}` : "/");
+    if (!pathEdited) setPublicPath(normalized ? `/api/${normalized}` : "/api");
   }
 
   useEffect(() => {
@@ -223,7 +223,7 @@ function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; s
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [props.method, publicHost, publicPath, routeInputValid, slug, version]);
 
-  const publicPathField = <Field label="公开路径"><input name="publicPath" required value={publicPath} onChange={(event) => { setPathEdited(true); setPublicPath(event.target.value); }} onBlur={() => setPublicPath(normalizePublicPath(publicPath))} className={inputClass} placeholder="/sjbz" /></Field>;
+  const publicPathField = <Field label="公开路径"><input name="publicPath" required value={publicPath} onChange={(event) => { setPathEdited(true); setPublicPath(event.target.value); }} onBlur={() => setPublicPath(normalizePublicPath(publicPath))} className={inputClass} placeholder="/api/sjbz" /></Field>;
   const routeFields = <>
     <Field label="API 域名"><input name="publicHost" required value={publicHost} onChange={(event) => setPublicHost(event.target.value.toLowerCase())} className={inputClass} placeholder="api.example.com" /></Field>
     {publicPathField}
@@ -233,7 +233,7 @@ function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; s
 
   return <Dialog open onOpenChange={(open) => { if (!open) props.close(); }}><DialogContent className="w-[min(calc(100%-24px),1024px)] p-0" showClose={false}><form onSubmit={props.submit}><input type="hidden" name="creationMode" value={mode} /><div className="flex flex-col gap-4 border-b border-[var(--line)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><DialogTitle className="text-[15px]">创建一个可调用的 API</DialogTitle><DialogDescription>快速添加使用安全默认值，完整配置保留全部网关能力。</DialogDescription></div><div className="flex items-center gap-2"><Tabs value={mode} onValueChange={(value) => setMode(value as "quick" | "full")}><TabsList><TabsTrigger value="quick">快速添加</TabsTrigger><TabsTrigger value="full">完整配置</TabsTrigger></TabsList></Tabs><Button type="button" onClick={props.close} variant="ghost" size="icon-sm" aria-label="关闭"><X /></Button></div></div>
     <div className="space-y-6 p-5"><Section title="这个 API 用来做什么"><div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{sourceOptions.filter((option) => props.canPublish || option.id !== "SERVER_LOCAL").map((option) => <button key={option.id} type="button" onClick={() => props.selectSource(option.id)} className={`min-h-28 rounded-[8px] border p-3 text-left transition ${props.sourceType === option.id ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[inset_0_0_0_1px_var(--brand)]" : "border-[var(--line)] hover:bg-[var(--surface-subtle)]"}`}><span className={`grid size-8 place-items-center rounded-[8px] ${option.tone}`}><option.icon className="size-4" /></span><strong className="mt-3 block text-[11px]">{option.name}</strong><span className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{option.description}</span></button>)}</div></Section>
-    <Section title="名称与公开路由"><div className={`grid gap-4 ${mode === "quick" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}><Field label="API 名称"><input name="name" required minLength={2} value={name} onChange={(event) => changeName(event.target.value)} className={inputClass} placeholder="例如：随机风景图" /></Field><Field label="唯一标识"><input name="slug" required minLength={2} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => changeSlug(event.target.value)} placeholder="自动生成" className={inputClass} /></Field>{mode === "quick" && publicPathField}</div>{mode === "full" ? <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{routeFields}</div> : <><input type="hidden" name="publicHost" value={publicHost} /><input type="hidden" name="version" value={version} /><input type="hidden" name="visibility" value="PUBLIC" /></>}<EndpointPath publicHost={publicHost} publicPath={publicPath} version={version} method={props.method} state={displayedRouteCheck} /></Section>
+    <Section title="名称与公开路由"><div className={`grid gap-4 ${mode === "quick" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}><Field label="API 名称"><input name="name" required minLength={2} value={name} onChange={(event) => changeName(event.target.value)} className={inputClass} placeholder="例如：随机风景图" /></Field><Field label="唯一标识"><input name="slug" required minLength={2} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => changeSlug(event.target.value)} placeholder="自动生成" className={inputClass} /></Field>{mode === "quick" && publicPathField}</div>{mode === "full" ? <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{routeFields}</div> : <><input type="hidden" name="publicHost" value={publicHost} /><input type="hidden" name="version" value={version} /><input type="hidden" name="visibility" value="PUBLIC" /></>}<EndpointPath platformUrl={props.defaultPublicUrl} publicHost={publicHost} publicPath={publicPath} version={version} method={props.method} state={displayedRouteCheck} /></Section>
     <Section title="返回内容"><SourceFields {...props} quick={mode === "quick"} selectedTemplate={selectedTemplate} /></Section>
     <Section title="收费方式"><div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => props.setBillingMode("FREE")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "FREE" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">免费调用</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">仍会记录调用量并执行 QPS 和月配额限制。</span></button><button type="button" onClick={() => props.setBillingMode("PER_REQUEST")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "PER_REQUEST" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">按成功请求收费</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">只有 2xx/3xx 成功响应产生费用，失败请求不收费。</span></button></div>{props.billingMode === "PER_REQUEST" && <div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label="单价（元/次）"><input name="unitPrice" required type="number" min="0.000001" step="0.000001" className={inputClass} placeholder="0.01" /></Field><Field label="每月免费次数" optional><input name="freeQuotaMonthly" type="number" min="0" defaultValue="0" className={inputClass} /></Field></div>}</Section>
     {mode === "full" ? <section className="rounded-[8px] border border-[var(--line)]"><button type="button" onClick={() => props.setAdvancedOpen(!props.advancedOpen)} className="flex w-full items-center justify-between px-4 py-3 text-left"><span><strong className="block text-[11px]">高级设置</strong><span className="mt-0.5 block text-[9px] text-[var(--muted)]">说明、分类、服务商、QPS、SLA 和安全策略均可按需配置</span></span><ChevronDown className={`size-4 transition ${props.advancedOpen ? "rotate-180" : ""}`} /></button>{props.advancedOpen && <AdvancedFields />}</section> : <div className="flex items-start gap-3 rounded-[8px] bg-[var(--aqua-soft)] px-4 py-3 text-[9px] leading-4 text-[var(--aqua)]"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><span>默认启用调用日志与 CORS，QPS 为 10，版本为 v1，并根据部署地址自动决定是否强制 HTTPS。创建后可随时进入路由配置调整。</span></div>}
@@ -256,11 +256,11 @@ function SourceFields(props: { sourceType: SourceType; quick: boolean; authType:
   return <div className="grid gap-4 sm:grid-cols-2"><Field label="内置工具"><select value={props.builtinHandler} onChange={(event) => props.setBuiltinHandler(event.target.value)} className={inputClass}>{internalHandlerTemplates.map((item) => <option key={item.id} value={item.id}>{item.name} - {item.description}</option>)}</select></Field><Field label="请求方法"><select value={props.method} onChange={(event) => props.setMethod(event.target.value)} className={inputClass}>{props.selectedTemplate.methods.map((item) => <option key={item}>{item}</option>)}</select></Field></div>;
 }
 
-function EndpointPath({ publicHost, publicPath, version, method, state }: { publicHost: string; publicPath: string; version: string; method: string; state: RouteCheckState }) {
-  const protocol = publicHost.includes("localhost") ? "http" : "https";
+function EndpointPath({ platformUrl, publicHost, publicPath, version, method, state }: { platformUrl: string; publicHost: string; publicPath: string; version: string; method: string; state: RouteCheckState }) {
+  const publicUrl = buildPublicApiUrl({ platformUrl, publicHost: publicHost || "localhost", publicPath });
   const tone = state.status === "available" ? "text-[var(--success)]" : state.status === "conflict" ? "text-[var(--danger)]" : "text-[var(--muted)]";
   const StateIcon = state.status === "checking" ? Loader2 : state.status === "available" ? CheckCircle2 : state.status === "conflict" ? CircleAlert : Link2;
-  return <div className="mt-3 flex flex-col gap-2 rounded-[8px] border border-[var(--line)] bg-[var(--surface-subtle)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-center gap-2"><span className="rounded-[6px] bg-[var(--brand-soft)] px-2 py-1 text-[8px] font-bold text-[var(--brand)]">{method}</span><code className="mono min-w-0 break-all text-[9px]">{protocol}://{publicHost || "api.example.com"}{publicPath}</code><span className="shrink-0 text-[8px] text-[var(--muted)]">{version}</span></div><span role="status" className={`inline-flex shrink-0 items-center gap-1.5 text-[8px] ${tone}`}><StateIcon className={`size-3.5 ${state.status === "checking" ? "animate-spin" : ""}`} />{state.message}</span></div>;
+  return <div className="mt-3 flex flex-col gap-2 rounded-[8px] border border-[var(--line)] bg-[var(--surface-subtle)] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"><div className="flex min-w-0 items-center gap-2"><span className="rounded-[6px] bg-[var(--brand-soft)] px-2 py-1 text-[8px] font-bold text-[var(--brand)]">{method}</span><code className="mono min-w-0 break-all text-[9px]">{publicUrl}</code><span className="shrink-0 text-[8px] text-[var(--muted)]">{version}</span></div><span role="status" className={`inline-flex shrink-0 items-center gap-1.5 text-[8px] ${tone}`}><StateIcon className={`size-3.5 ${state.status === "checking" ? "animate-spin" : ""}`} />{state.message}</span></div>;
 }
 function AdvancedFields() {
   return <div className="grid gap-4 border-t border-[var(--line)] p-4 sm:grid-cols-2 lg:grid-cols-4">
