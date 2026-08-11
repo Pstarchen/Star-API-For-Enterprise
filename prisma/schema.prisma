@@ -50,6 +50,7 @@ enum ApiUpstreamType {
 enum ApiRewriteMode {
   PASSTHROUGH
   PREFIX
+  EXACT
 }
 
 enum ApiHealthStatus {

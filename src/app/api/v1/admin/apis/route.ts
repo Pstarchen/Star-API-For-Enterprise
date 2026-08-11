@@ -47,7 +47,7 @@ const createSchema = z.object({
   upstreamHeaderName: optionalText(80),
   upstreamHeaderValue: z.string().max(4000).optional().default(""),
   allowPrivateNetwork: z.boolean().default(false),
-  rewriteMode: z.enum(["PASSTHROUGH", "PREFIX"]).default("PASSTHROUGH"),
+  rewriteMode: z.enum(["PASSTHROUGH", "PREFIX", "EXACT"]).default("PASSTHROUGH"),
   upstreamPrefix: optionalText(180),
   healthPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/).default("/"),
   timeoutMs: z.coerce.number().int().min(500).max(60000).default(10000),

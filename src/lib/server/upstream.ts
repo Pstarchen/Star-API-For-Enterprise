@@ -32,7 +32,8 @@ export async function assertSafeUpstream(value: string, kind: UpstreamKind) {
   return url;
 }
 
-export function rewriteUpstreamPath(relativePath: string, mode: "PASSTHROUGH" | "PREFIX", upstreamPrefix: string) {
+export function rewriteUpstreamPath(relativePath: string, mode: "PASSTHROUGH" | "PREFIX" | "EXACT", upstreamPrefix: string) {
+  if (mode === "EXACT") return "";
   if (mode === "PASSTHROUGH") return relativePath;
   const prefix = `/${upstreamPrefix}`.replace(/\/{2,}/g, "/").replace(/\/$/, "");
   const suffix = relativePath === "/" ? "" : `/${relativePath}`.replace(/\/{2,}/g, "/");
@@ -147,8 +148,10 @@ export async function forwardRequest(input: {
   requestId: string;
 }) {
   const base = await assertSafeUpstream(input.baseUrl, input.kind);
-  const target = new URL(input.relativePath.replace(/^\/+/, ""), `${base.toString().replace(/\/+$/, "")}/`);
-  target.search = input.query;
+  const target = input.relativePath === ""
+    ? new URL(base)
+    : new URL(input.relativePath.replace(/^\/+/, ""), `${base.toString().replace(/\/+$/, "")}/`);
+  if (input.query) target.search = input.query;
   const headers = new Headers({ Accept: "*/*", "User-Agent": "Star-API-Gateway/1.0", "X-Star-Request-Id": input.requestId });
   if (input.contentType) headers.set("Content-Type", input.contentType);
   if (input.authType === "BEARER" && typeof input.secrets.token === "string") headers.set("Authorization", `Bearer ${input.secrets.token}`);

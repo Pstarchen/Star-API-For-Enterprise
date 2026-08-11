@@ -228,7 +228,7 @@ async function main() {
   const phpArchive = zipSync({ "index.php": strToU8("<?php header('Content-Type: application/json'); echo json_encode(['ok' => true, 'source' => 'php']);") });
   const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, method: "ALL", entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
-  const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}`, healthPath: "/health" });
+  const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}/fixed/`, rewriteMode: "EXACT", healthPath: "/health" });
   const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: "/README.md", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/README.md" });
   const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Redirect Upstream Smoke", slug: `redirect-${runId}`, publicPath: "/github/gitignore/raw/main/README.md", upstreamBaseUrl: "https://github.com", healthPath: "/github/gitignore/raw/main/README.md" });
   const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: "/LICENSE", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/LICENSE" });
@@ -323,7 +323,9 @@ async function main() {
   response = await request(`/${builtinApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "built-in API gateway call", await response.text());
   response = await request(`/${localApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
-  expectStatus(response.status, 200, "server-local gateway call", await response.text());
+  const localResponse = await response.json();
+  expectStatus(response.status, 200, "server-local exact-address gateway call", localResponse);
+  assert.equal(localResponse.path, "/fixed/", "exact-address mode must not append the public route path");
   response = await request("/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
   response = await request("/github/gitignore/raw/main/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);

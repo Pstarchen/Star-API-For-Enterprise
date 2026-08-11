@@ -1,0 +1,1 @@
+ALTER TYPE "ApiRewriteMode" ADD VALUE 'EXACT';
