@@ -323,15 +323,16 @@ model ApiProduct {
 }
 
 model ApiAsset {
-  id        String     @id @default(cuid())
-  productId String
-  kind      String
-  name      String
-  mimeType  String
-  data      Bytes
-  size      Int
-  createdAt DateTime   @default(now())
-  product   ApiProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  id         String     @id @default(cuid())
+  productId  String
+  kind       String
+  name       String
+  mimeType   String
+  data       Bytes
+  storageKey String?    @unique
+  size       BigInt
+  createdAt  DateTime   @default(now())
+  product    ApiProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, kind, createdAt])
 }
@@ -541,7 +542,7 @@ model RequestLog {
   region        String
   billableUnits BigInt      @default(0)
   amount        Decimal     @default(0) @db.Decimal(14, 6)
-  responseBytes Int         @default(0)
+  responseBytes BigInt      @default(0)
   errorCode     String?
   billed        Boolean     @default(false)
   occurredAt    DateTime    @default(now())

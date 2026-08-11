@@ -4,6 +4,7 @@ import { assetErrorMessage, MAX_TOTAL_ASSET_BYTES, prepareApiAssets, preparePhpP
 import { isAssetBackedHandler, isContentHandler, phpHandlerId } from "@/lib/internal-handlers";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { removeStoredMedia } from "@/lib/server/media-storage";
 
 async function admin() {
   const user = await getCurrentUser();
@@ -22,12 +23,21 @@ export async function GET(request: Request) {
   const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, internalHandler: true, provider: { select: { ownerTenantId: true } } } });
   if (!product || !isAssetBackedHandler(product.internalHandler)) return Response.json({ code: 404, message: "可管理内容的 API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
+  if (["content.random-image", "content.random-video"].includes(product.internalHandler ?? "")) {
+    const kind = product.internalHandler === "content.random-video" ? "VIDEO" : "IMAGE";
+    const [assets, total, size] = await Promise.all([
+      prisma.apiAsset.findMany({ where: { productId, kind }, select: { id: true, kind: true, name: true, mimeType: true, size: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 500 }),
+      prisma.apiAsset.count({ where: { productId, kind } }),
+      prisma.apiAsset.aggregate({ where: { productId, kind }, _sum: { size: true } }),
+    ]);
+    return Response.json({ code: 200, data: assets.map((asset) => ({ ...asset, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), preview: null })), meta: { total, size: Number(size._sum.size ?? 0), displayed: assets.length } }, { headers: noStoreHeaders });
+  }
   if (product.internalHandler === "content.random-text") {
     const assets = await prisma.apiAsset.findMany({ where: { productId }, select: { id: true, kind: true, name: true, mimeType: true, size: true, createdAt: true, data: true }, orderBy: { createdAt: "desc" }, take: 1000 });
-    return Response.json({ code: 200, data: assets.map((asset) => ({ ...asset, createdAt: asset.createdAt.toISOString(), data: undefined, preview: Buffer.from(asset.data).toString("utf8") })) }, { headers: noStoreHeaders });
+    return Response.json({ code: 200, data: assets.map((asset) => ({ ...asset, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), data: undefined, preview: Buffer.from(asset.data).toString("utf8") })) }, { headers: noStoreHeaders });
   }
   const assets = await prisma.apiAsset.findMany({ where: { productId }, select: { id: true, kind: true, name: true, mimeType: true, size: true, createdAt: true }, orderBy: { createdAt: "desc" }, take: 1000 });
-  return Response.json({ code: 200, data: assets.map((asset) => ({ ...asset, createdAt: asset.createdAt.toISOString(), preview: null })) }, { headers: noStoreHeaders });
+  return Response.json({ code: 200, data: assets.map((asset) => ({ ...asset, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), preview: null })) }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: Request) {
@@ -42,6 +52,7 @@ export async function POST(request: Request) {
   const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, slug: true, internalHandler: true, executionConfig: true, provider: { select: { ownerTenantId: true } }, _count: { select: { assets: true } } } });
   if (!product || !isAssetBackedHandler(product.internalHandler)) return Response.json({ code: 404, message: "可管理内容的 API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
+  if (["content.random-image", "content.random-video"].includes(product.internalHandler ?? "")) return Response.json({ code: 409, message: "图片和视频请使用流式上传入口" }, { status: 409, headers: noStoreHeaders });
   let assets;
   let normalizedEntry = entryFile;
   try {
@@ -59,7 +70,7 @@ export async function POST(request: Request) {
   if (!replaceAll && Number(currentSize._sum.size ?? 0) + assets.reduce((sum, item) => sum + item.size, 0) > MAX_TOTAL_ASSET_BYTES) return Response.json({ code: 409, message: "单个 API 的内容总大小不能超过 64 MB" }, { status: 409, headers: noStoreHeaders });
   await prisma.$transaction(async (transaction) => {
     if (replaceAll) await transaction.apiAsset.deleteMany({ where: { productId } });
-    await transaction.apiAsset.createMany({ data: assets.map((asset) => ({ ...asset, productId })) });
+    await transaction.apiAsset.createMany({ data: assets.map((asset) => ({ ...asset, productId, size: BigInt(asset.size) })) });
     if (product.internalHandler === phpHandlerId) {
       const config = product.executionConfig && typeof product.executionConfig === "object" && !Array.isArray(product.executionConfig) ? product.executionConfig as Record<string, unknown> : {};
       await transaction.apiProduct.update({ where: { id: product.id }, data: { executionConfig: { ...config, entryFile: normalizedEntry } } });
@@ -83,6 +94,7 @@ export async function DELETE(request: Request) {
     prisma.apiAsset.delete({ where: { id } }),
     prisma.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.content.delete", resource: "api-product", resourceId: asset.product.id, metadata: { assetId: asset.id, name: asset.name }, ipAddress: requestIp(request) } }),
   ]);
+  if (["IMAGE", "VIDEO"].includes(asset.kind)) await removeStoredMedia(asset.storageKey).catch(() => undefined);
   revalidatePath("/", "layout");
   return Response.json({ code: 200, message: "内容已删除" }, { headers: noStoreHeaders });
 }

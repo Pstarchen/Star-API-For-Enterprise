@@ -32,7 +32,9 @@ ENV NODE_ENV=production \
     PORT=3000
 
 RUN addgroup --system --gid 1001 nodejs \
-    && adduser --system --uid 1001 --ingroup nodejs nextjs
+    && adduser --system --uid 1001 --ingroup nodejs nextjs \
+    && mkdir -p /var/lib/star-api/assets \
+    && chown -R nextjs:nodejs /var/lib/star-api
 
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./

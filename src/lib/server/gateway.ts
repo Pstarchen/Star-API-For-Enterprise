@@ -194,25 +194,25 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
   const mappedInput = mappedUpstreamInput(endpoint.parameters, url.searchParams, parsedBody, body);
 
   let statusCode = 500;
-  let responseBytes = 0;
+  let responseBytes = BigInt(0);
   let errorCode: string | null = null;
   let response: Response;
   let selectedNodeId: string | null = null;
   try {
     if (upstream.type === "CONTENT") {
       if (!isContentHandler(product.internalHandler)) throw new Error("CONTENT_HANDLER_MISSING");
-      const content = await contentResponse(product.id, product.internalHandler);
+      const content = await contentResponse(product.id, product.internalHandler, request);
       response = content.response; responseBytes = content.responseBytes; statusCode = response.status;
     } else if (upstream.type === "PHP_PACKAGE") {
       const config = product.executionConfig && typeof product.executionConfig === "object" && !Array.isArray(product.executionConfig) ? product.executionConfig as Record<string, unknown> : {};
       const runtime = await executePhpPackage({ productId: product.id, entryFile: typeof config.entryFile === "string" ? config.entryFile : "index.php", request, relativePath: publicPath, body, timeoutMs: upstream.timeoutMs });
-      response = runtime.response; responseBytes = runtime.responseBytes; statusCode = response.status; errorCode = runtime.runtimeError;
+      response = runtime.response; responseBytes = BigInt(runtime.responseBytes); statusCode = response.status; errorCode = runtime.runtimeError;
     } else if (upstream.type === "BUILTIN") {
       const fallbackBody = body?.byteLength ? { value: new TextDecoder().decode(body), text: new TextDecoder().decode(body) } : null;
       const result = executeInternalHandler(product.internalHandler, { body: parsedBody ?? fallbackBody, query: url.searchParams });
       statusCode = result.status;
       const payload = JSON.stringify({ code: statusCode, message: statusCode < 400 ? "ok" : "request failed", requestId, data: result.data });
-      responseBytes = Buffer.byteLength(payload);
+      responseBytes = BigInt(Buffer.byteLength(payload));
       response = new Response(payload, { status: statusCode, headers: { "Content-Type": "application/json; charset=utf-8" } });
     } else {
       const enabled = upstream.nodes.filter((node) => node.enabled);
@@ -221,7 +221,7 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
       selectedNodeId = node.id;
       const targetPath = rewriteUpstreamPath(publicPath, upstream.rewriteMode, upstream.upstreamPrefix);
       const result = await forwardRequest({ baseUrl: node.baseUrl, relativePath: targetPath, method: request.method, query: mappedInput.query ? `?${mappedInput.query}` : "", body: mappedInput.body, contentType: request.headers.get("content-type"), timeoutMs: upstream.timeoutMs, authType: upstream.authType, secrets: decryptJson(upstream.secretConfigEncrypted), kind: upstream.type, requestId });
-      statusCode = result.response.status; responseBytes = result.body.byteLength;
+      statusCode = result.response.status; responseBytes = BigInt(result.body.byteLength);
       response = new Response(result.body, { status: statusCode, headers: { "Content-Type": result.response.headers.get("content-type") ?? "application/octet-stream" } });
       await prisma.apiUpstreamNode.update({ where: { id: node.id }, data: { healthStatus: "HEALTHY", failureCount: 0, lastCheckedAt: new Date(), lastError: null } });
     }
@@ -235,7 +235,7 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
 
   const responseRule = endpoint.responseRules.find((rule) => rule.statusCode === statusCode);
   response = await applyResponseRules(response, [...endpoint.parameters.filter((item) => item.sensitive).map((item) => item.name), ...(responseRule?.maskedFields ?? [])]);
-  responseBytes = Number(response.headers.get("content-length") ?? responseBytes);
+  responseBytes = BigInt(response.headers.get("content-length") ?? responseBytes);
 
   const success = statusCode >= 200 && statusCode < 400;
   const billableUnits = success ? BigInt(1) : BigInt(0);

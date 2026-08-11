@@ -4,6 +4,7 @@ import { randomInt } from "node:crypto";
 import { unzipSync } from "fflate";
 import type { ContentHandlerId } from "@/lib/internal-handlers";
 import { prisma } from "@/lib/server/prisma";
+import { storedMediaResponse } from "@/lib/server/media-storage";
 
 export const MAX_ASSET_FILES = 40;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -133,13 +134,26 @@ export function assetErrorMessage(error: unknown) {
   return messages[error.message] ?? null;
 }
 
-export async function contentResponse(productId: string, handler: ContentHandlerId) {
+export async function contentResponse(productId: string, handler: ContentHandlerId, request: Request) {
+  if (handler === "content.random-video") {
+    const count = await prisma.apiAsset.count({ where: { productId, kind: "VIDEO" } });
+    if (!count) throw new Error("CONTENT_NOT_CONFIGURED");
+    const asset = await prisma.apiAsset.findFirst({
+      where: { productId, kind: "VIDEO" },
+      orderBy: { createdAt: "asc" },
+      skip: randomInt(count),
+      select: { id: true, storageKey: true, name: true, mimeType: true, size: true },
+    });
+    if (!asset) throw new Error("CONTENT_NOT_CONFIGURED");
+    return storedMediaResponse({ ...asset, kind: "VIDEO" }, request);
+  }
   const kind = handler === "content.random-image" ? "IMAGE" : handler === "content.random-text" ? "TEXT" : "JSON";
   const count = await prisma.apiAsset.count({ where: { productId, kind } });
   if (!count) throw new Error("CONTENT_NOT_CONFIGURED");
   const asset = await prisma.apiAsset.findFirst({ where: { productId, kind }, orderBy: { createdAt: "asc" }, skip: handler === "content.static-json" ? 0 : randomInt(count) });
   if (!asset) throw new Error("CONTENT_NOT_CONFIGURED");
-  const headers = new Headers({ "Content-Type": asset.mimeType, "Cache-Control": "no-store", "X-Star-Asset-Id": asset.id });
+  if (kind === "IMAGE" && asset.storageKey) return storedMediaResponse(asset, request);
+  const headers = new Headers({ "Content-Type": asset.mimeType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Star-Asset-Id": asset.id });
   if (kind === "IMAGE") headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(asset.name)}`);
   return { response: new Response(Buffer.from(asset.data), { status: 200, headers }), responseBytes: asset.size };
 }

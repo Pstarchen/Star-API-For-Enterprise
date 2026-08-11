@@ -9,6 +9,7 @@ import { assetErrorMessage, prepareApiAssets, preparePhpPackage, type PreparedAs
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { getPlatformConfig } from "@/lib/server/installation";
+import { removeStoredMedia } from "@/lib/server/media-storage";
 import { findRouteConflict, findSlugConflict } from "@/lib/server/api-routing";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
@@ -16,7 +17,7 @@ import { assertSafeUpstream, checkUpstreamHealth } from "@/lib/server/upstream";
 
 const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "ALL"] as const;
 const handlerIds = internalHandlerTemplates.map((item) => item.id) as [string, ...string[]];
-const sourceTypes = ["RANDOM_IMAGE", "RANDOM_TEXT", "STATIC_JSON", "PHP_PACKAGE", "EXTERNAL", "SERVER_LOCAL", "TUNNEL", "BUILTIN"] as const;
+const sourceTypes = ["RANDOM_IMAGE", "RANDOM_VIDEO", "RANDOM_TEXT", "STATIC_JSON", "PHP_PACKAGE", "EXTERNAL", "SERVER_LOCAL", "TUNNEL", "BUILTIN"] as const;
 
 const optionalText = (maximum: number) => z.string().trim().max(maximum).optional().default("");
 const createSchema = z.object({
@@ -91,6 +92,7 @@ async function admin() {
 
 function contentHandler(sourceType: typeof sourceTypes[number]): ContentHandlerId | null {
   if (sourceType === "RANDOM_IMAGE") return "content.random-image";
+  if (sourceType === "RANDOM_VIDEO") return "content.random-video";
   if (sourceType === "RANDOM_TEXT") return "content.random-text";
   if (sourceType === "STATIC_JSON") return "content.static-json";
   return null;
@@ -98,6 +100,7 @@ function contentHandler(sourceType: typeof sourceTypes[number]): ContentHandlerI
 
 function endpointSchema(sourceType: typeof sourceTypes[number]) {
   if (sourceType === "RANDOM_IMAGE") return { type: "string", format: "binary", contentType: "image/*" };
+  if (sourceType === "RANDOM_VIDEO") return { type: "string", format: "binary", contentType: "video/*", supportsRanges: true };
   if (sourceType === "RANDOM_TEXT") return { type: "string", contentType: "text/plain; charset=utf-8" };
   if (sourceType === "STATIC_JSON") return { type: "object", contentType: "application/json; charset=utf-8" };
   if (sourceType === "PHP_PACKAGE") return { type: "object", description: "PHP 程序包动态响应" };
@@ -175,7 +178,7 @@ export async function POST(request: Request) {
   let assets: PreparedAsset[] = [];
   let phpEntryFile = input.entryFile || "index.php";
   try {
-    if (handler) assets = await prepareApiAssets(handler, { files: payload.files, content: input.content });
+    if (handler && handler !== "content.random-video" && (handler !== "content.random-image" || payload.files.length)) assets = await prepareApiAssets(handler, { files: payload.files, content: input.content });
     if (input.sourceType === "PHP_PACKAGE") {
       const prepared = await preparePhpPackage(payload.files[0], phpEntryFile);
       assets = prepared.assets;
@@ -226,7 +229,7 @@ export async function POST(request: Request) {
           freeQuotaMonthly: input.freeQuotaMonthly,
           defaultQpsLimit: input.defaultQpsLimit,
           upstream: { create: { type: upstreamType, rewriteMode: input.rewriteMode, upstreamPrefix: input.upstreamPrefix, healthPath: input.healthPath, timeoutMs: input.timeoutMs, authType: networkSource ? input.upstreamAuthType : "NONE", secretConfigEncrypted: Object.keys(secretConfig).length ? encryptJson(secretConfig) : null, allowPrivateNetwork: input.sourceType === "SERVER_LOCAL", nodes: networkSource ? { create: { name: "主节点", baseUrl: input.upstreamBaseUrl, weight: 100 } } : undefined } },
-          assets: assets.length ? { create: assets } : undefined,
+          assets: assets.length ? { create: assets.map((asset) => ({ ...asset, size: BigInt(asset.size) })) } : undefined,
           versions: { create: { version, basePath: `https://${input.publicHost}`, endpoints: { create: { method, path: input.path, publicHost: input.publicHost, publicPath: input.publicPath, routeVersion: version, requestFormat: input.requestFormat, summary: input.summary || input.name, schema: endpointSchema(input.sourceType), corsEnabled: input.corsEnabled, forceHttps: input.forceHttps, requestLogging: input.requestLogging, dailyLimit: input.dailyLimit, ipAllowlist: input.ipAllowlist, ipDenylist: input.ipDenylist } } } },
         },
       });
@@ -282,7 +285,7 @@ export async function DELETE(request: Request) {
   if ("error" in auth) return auth.error;
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return Response.json({ code: 400, message: "缺少 API ID" }, { status: 400, headers: noStoreHeaders });
-  const existing = await prisma.apiProduct.findUnique({ where: { id }, include: { provider: true, _count: { select: { subscriptions: true } } } });
+  const existing = await prisma.apiProduct.findUnique({ where: { id }, include: { provider: true, assets: { where: { storageKey: { not: null } }, select: { storageKey: true } }, _count: { select: { subscriptions: true } } } });
   if (!existing) return Response.json({ code: 404, message: "API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && existing.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权删除其他服务商的 API" }, { status: 403, headers: noStoreHeaders });
   if (!["DRAFT", "OFFLINE"].includes(existing.status)) return Response.json({ code: 409, message: "请先将 API 下线，再执行删除" }, { status: 409, headers: noStoreHeaders });
@@ -291,6 +294,7 @@ export async function DELETE(request: Request) {
     prisma.apiProduct.delete({ where: { id } }),
     prisma.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.delete", resource: "api-product", resourceId: id, metadata: { slug: existing.slug, cancelledSubscriptions: existing._count.subscriptions }, ipAddress: requestIp(request) } }),
   ]);
+  await Promise.all(existing.assets.map((asset) => removeStoredMedia(asset.storageKey).catch(() => undefined)));
   revalidatePath("/", "layout");
   return Response.json({ code: 200, message: existing._count.subscriptions ? `API 已删除，同时取消 ${existing._count.subscriptions} 个应用订阅` : "API 已删除" }, { headers: noStoreHeaders });
 }

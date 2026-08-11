@@ -1,33 +1,9 @@
 name: star-api-platform
 
 services:
-  caddy:
-    image: ${CADDY_IMAGE:-caddy:2-alpine}
-    restart: unless-stopped
-    environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS is required}
-    ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-      - "${HTTPS_PORT:-443}:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - starapi-caddy-data:/data
-      - starapi-caddy-config:/config
-    depends_on:
-      app:
-        condition: service_healthy
-    networks:
-      - frontend
-
   migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: migrator
-      args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
-    image: star-api-migrator:local
+    image: ${STAR_API_MIGRATOR_IMAGE:-ghcr.io/pstarchen/star-api-migrator}:${STAR_API_VERSION:?STAR_API_VERSION is required}
+    pull_policy: always
     restart: "no"
     environment:
       DATABASE_URL: postgresql://starapi:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/starapi?schema=public
@@ -38,25 +14,20 @@ services:
       - backend
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
-        PRISMA_ENGINES_MIRROR: ${PRISMA_ENGINES_MIRROR:-}
-    image: star-api-platform:local
+    image: ${STAR_API_APP_IMAGE:-ghcr.io/pstarchen/star-api-app}:${STAR_API_VERSION:?STAR_API_VERSION is required}
+    pull_policy: always
     restart: unless-stopped
     init: true
     environment:
       NODE_ENV: production
-      APP_VERSION: ${APP_VERSION:-0.1.0}
+      APP_VERSION: ${STAR_API_VERSION:?STAR_API_VERSION is required}
       DATABASE_URL: postgresql://starapi:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/starapi?schema=public
       REDIS_URL: redis://redis:6379
       API_KEY_PEPPER: ${API_KEY_PEPPER:?API_KEY_PEPPER is required}
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       INSTALL_TOKEN: ${INSTALL_TOKEN:?INSTALL_TOKEN is required}
       INTERNAL_GATEWAY_SECRET: ${INTERNAL_GATEWAY_SECRET:?INTERNAL_GATEWAY_SECRET is required}
-      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?CONFIG_ENCRYPTION_KEY is required}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       API_PUBLIC_HOST: ${API_PUBLIC_HOST:?API_PUBLIC_HOST is required}
       API_PUBLIC_URL: ${API_PUBLIC_URL:?API_PUBLIC_URL is required}
@@ -65,10 +36,10 @@ services:
       PHP_RUNNER_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       API_ASSET_STORAGE_PATH: /var/lib/star-api/assets
       MEDIA_MAX_API_GB: ${MEDIA_MAX_API_GB:-100}
-    volumes:
-      - starapi-api-assets:/var/lib/star-api/assets
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-18081}:3000"
+    volumes:
+      - starapi-api-assets:/var/lib/star-api/assets
     depends_on:
       postgres:
         condition: service_healthy
@@ -92,12 +63,8 @@ services:
       - "host.docker.internal:host-gateway"
 
   php-runner:
-    build:
-      context: ./php-runner
-      dockerfile: Dockerfile
-      args:
-        ALPINE_IMAGE: ${ALPINE_IMAGE:-m.daocloud.io/docker.io/library/alpine:3.20}
-    image: star-api-php-runner:local
+    image: ${STAR_API_PHP_RUNNER_IMAGE:-ghcr.io/pstarchen/star-api-php-runner}:${STAR_API_VERSION:?STAR_API_VERSION is required}
+    pull_policy: always
     restart: unless-stopped
     environment:
       RUNNER_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
@@ -163,6 +130,4 @@ networks:
 volumes:
   starapi-postgres:
   starapi-redis:
-  starapi-caddy-data:
-  starapi-caddy-config:
   starapi-api-assets:

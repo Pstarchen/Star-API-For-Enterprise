@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
-import { createServer, request as httpRequest } from "node:http";
+import { createServer } from "node:http";
 import { zipSync, strToU8 } from "fflate";
 
 const portalUrl = requiredEnv("E2E_PORTAL_URL").replace(/\/$/, "");
-const apiUrl = requiredEnv("E2E_API_URL").replace(/\/$/, "");
-const apiConnectUrl = (process.env.E2E_API_CONNECT_URL ?? apiUrl).replace(/\/$/, "");
 const installToken = requiredEnv("E2E_INSTALL_TOKEN");
 const runId = Date.now().toString(36);
 const password = `Smoke-${runId}-Pass9`;
@@ -26,32 +24,18 @@ function cookieFrom(response) {
   return response.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
 }
 
-async function request(path, options = {}, cookie = "", base = portalUrl) {
+async function request(path, options = {}, cookie = "") {
   const headers = new Headers(options.headers);
   if (cookie) headers.set("Cookie", cookie);
-  const targetBase = base === apiUrl ? apiConnectUrl : base;
-  if (base === apiUrl && targetBase !== apiUrl) {
-    headers.set("Host", new URL(apiUrl).hostname);
-    if (options.body) throw new Error("E2E gateway transport currently supports bodyless requests only");
-    return new Promise((resolve, reject) => {
-      const outgoing = httpRequest(`${targetBase}${path}`, { method: options.method ?? "GET", headers: Object.fromEntries(headers) }, (incoming) => {
-        const chunks = [];
-        incoming.on("data", (chunk) => chunks.push(chunk));
-        incoming.on("end", () => resolve(new Response(Buffer.concat(chunks), { status: incoming.statusCode ?? 500, headers: incoming.headers })));
-      });
-      outgoing.once("error", reject);
-      outgoing.end();
-    });
-  }
-  return fetch(`${targetBase}${path}`, { ...options, headers, redirect: options.redirect ?? "manual" });
+  return fetch(`${portalUrl}${path}`, { ...options, headers, redirect: options.redirect ?? "manual" });
 }
 
-async function jsonRequest(path, options = {}, cookie = "", base = portalUrl) {
+async function jsonRequest(path, options = {}, cookie = "") {
   const response = await request(path, {
     ...options,
     headers: { "Content-Type": "application/json", ...options.headers },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
-  }, cookie, base);
+  }, cookie);
   const body = await response.json().catch(() => null);
   return { response, body };
 }
@@ -68,8 +52,8 @@ async function createApi(cookie, config, assets = []) {
     categoryId: config.categoryId ?? defaultCategoryId,
     color: "#586be8",
     tags: ["e2e"],
-    publicHost: new URL(apiUrl).hostname,
-    publicPath: `/${config.slug}`,
+    publicHost: new URL(portalUrl).hostname,
+    publicPath: `/api/${config.slug}`,
     visibility: "PUBLIC",
     method: "GET",
     path: "/",
@@ -89,6 +73,17 @@ async function createApi(cookie, config, assets = []) {
   const body = await response.json().catch(() => null);
   expectStatus(response.status, 201, `create ${config.sourceType} API`, body);
   return body.data;
+}
+
+async function uploadMedia(cookie, productId, name, bytes, type, expectedStatus = 201) {
+  const response = await request(`/api/v1/admin/apis/media?productId=${encodeURIComponent(productId)}`, {
+    method: "POST",
+    headers: { "Content-Type": type, "X-File-Name": encodeURIComponent(name) },
+    body: new Blob([bytes], { type }),
+  }, cookie);
+  const body = await response.json().catch(() => null);
+  expectStatus(response.status, expectedStatus, `${expectedStatus === 201 ? "upload" : "reject"} media ${name}`, body);
+  return body;
 }
 
 async function publishApi(cookie, product) {
@@ -217,7 +212,7 @@ async function main() {
   expectStatus(result.response.status, 403, "non-admin policy access denied", result.body);
 
   const staticSlug = `static-${runId}`;
-  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(apiUrl).hostname, path: `/${staticSlug}`, version: "v1", method: "GET", slug: staticSlug })}`, {}, adminCookie);
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(portalUrl).hostname, path: `/api/${staticSlug}`, version: "v1", method: "GET", slug: staticSlug })}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "route preflight available", result.body);
   assert.equal(result.body.data.available, true);
 
@@ -225,13 +220,22 @@ async function main() {
   const textApi = await createApi(adminCookie, { sourceType: "RANDOM_TEXT", name: "Random Text Smoke", slug: `text-${runId}`, content: "alpha\nbeta" });
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nZcAAAAASUVORK5CYII=", "base64");
   const imageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Random Image Smoke", slug: `image-${runId}` }, [{ name: "pixel.png", blob: new Blob([png], { type: "image/png" }) }]);
+  await uploadMedia(adminCookie, imageApi.id, "pixel-streamed.png", png, "image/png");
+  const videoApi = await createApi(adminCookie, { sourceType: "RANDOM_VIDEO", name: "Random Video Smoke", slug: `video-${runId}` });
+  const tinyMp4 = Buffer.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0, 0x69, 0x73, 0x6f, 0x6d, 0x6d, 0x70, 0x34, 0x32]);
+  await uploadMedia(adminCookie, videoApi.id, "tiny.mp4", tinyMp4, "video/mp4");
+  await uploadMedia(adminCookie, videoApi.id, "disguised.mp4", Buffer.from("<?php echo 'unsafe';"), "video/mp4", 400);
+  const cleanupVideoApi = await createApi(adminCookie, { sourceType: "RANDOM_VIDEO", name: "Disposable Video Smoke", slug: `video-delete-${runId}` });
+  await uploadMedia(adminCookie, cleanupVideoApi.id, "delete-me.mp4", tinyMp4, "video/mp4");
+  response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(cleanupVideoApi.id)}`, { method: "DELETE" }, adminCookie);
+  expectStatus(response.status, 200, "delete draft media API and stored file", await response.json());
   const phpArchive = zipSync({ "index.php": strToU8("<?php header('Content-Type: application/json'); echo json_encode(['ok' => true, 'source' => 'php']);") });
   const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, method: "ALL", entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
   const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}/fixed/`, rewriteMode: "EXACT", healthPath: "/health" });
-  const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: "/README.md", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/README.md" });
-  const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Redirect Upstream Smoke", slug: `redirect-${runId}`, publicPath: "/github/gitignore/raw/main/README.md", upstreamBaseUrl: "https://github.com", healthPath: "/github/gitignore/raw/main/README.md" });
-  const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: "/LICENSE", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/LICENSE" });
+  const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
+  const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Second External Upstream Smoke", slug: `external-second-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
+  const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
 
   const quickForm = new FormData();
   quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", categoryId: defaultCategoryId, name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
@@ -258,11 +262,27 @@ async function main() {
   expectStatus(response.status, 409, "duplicate route rejected on creation", await response.text());
 
   const privateForm = new FormData();
-  privateForm.set("config", JSON.stringify({ sourceType: "EXTERNAL", categoryId: defaultCategoryId, name: "Blocked Private Upstream", slug: `blocked-upstream-${runId}`, publicHost: new URL(apiUrl).hostname, publicPath: `/blocked-upstream-${runId}`, upstreamBaseUrl: "http://127.0.0.1:8080" }));
+  privateForm.set("config", JSON.stringify({ sourceType: "EXTERNAL", categoryId: defaultCategoryId, name: "Blocked Private Upstream", slug: `blocked-upstream-${runId}`, publicHost: new URL(portalUrl).hostname, publicPath: `/api/blocked-upstream-${runId}`, upstreamBaseUrl: "http://127.0.0.1:8080" }));
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
+  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) {
+    assert.equal(product.publicHost, new URL(portalUrl).hostname, `${product.slug} must use the platform host`);
+    assert.match(product.endpoint, /^\/api\//, `${product.slug} must use the /api prefix`);
+  }
+  const portal = new URL(portalUrl);
+  const alternateHost = portal.hostname === "localhost" ? "127.0.0.1" : "localhost";
+  const alternatePublicUrl = `${portal.protocol}//${alternateHost}${portal.port ? `:${portal.port}` : ""}`;
+  const platformSettings = { name: "Star-API E2E", description: "Automated end-to-end verification environment.", icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "keep" };
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { ...platformSettings, publicUrl: alternatePublicUrl } }, adminCookie);
+  expectStatus(result.response.status, 200, "changing public URL migrates API routes", result.body);
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(staticApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "read API route after public URL migration", result.body);
+  assert.equal(result.body.data.route.publicHost, alternateHost);
+  assert.equal(result.body.data.route.publicPath, staticApi.endpoint);
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { ...platformSettings, publicUrl: portalUrl } }, adminCookie);
+  expectStatus(result.response.status, 200, "restoring public URL migrates API routes", result.body);
+  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "Admin API Test App", environment: "TEST" } }, adminCookie);
   expectStatus(result.response.status, 201, "administrator creates test application and API key", result.body);
@@ -282,7 +302,7 @@ async function main() {
   response = await request(`/apis/${staticSlug}`);
   const detailHtml = await response.text();
   expectStatus(response.status, 200, "API detail uses direct public route", detailHtml);
-  assert.ok(detailHtml.includes(`${apiUrl}/${staticSlug}`), "API detail must use the gateway domain plus public path");
+  assert.ok(detailHtml.includes(`${portalUrl}${staticApi.endpoint}`), "API detail must use the platform domain and /api public path");
   assert.ok(!detailHtml.includes("/api/v1/gateway/"), "API detail must not add a legacy API prefix");
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "E2E Test App", environment: "TEST" } }, personalCookie);
@@ -292,7 +312,7 @@ async function main() {
   assert.match(apiKey, /^sk_test_/);
 
   let latestSubscriptionResult;
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
 
   const quickSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === quickApi.id);
   assert.ok(quickSubscription, "quick API subscription must exist before cancellation");
@@ -307,34 +327,39 @@ async function main() {
   expectStatus(result.response.status, 200, "statistics before gateway calls", result.body);
   const callsBefore = result.body.data.totalCalls;
 
-  response = await request(`/${staticApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(staticApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway static JSON call", await response.text());
   assert.equal(response.headers.get("x-request-cost"), "0.25");
   assert.equal(response.headers.get("x-billable-units"), "1");
-  response = await request(`/${staticApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(staticApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 429, "gateway daily limit enforcement", await response.text());
-  response = await request(`/${textApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(textApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway random text call", await response.text());
-  response = await request(`/${imageApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(imageApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway random image call", await response.text());
   assert.match(response.headers.get("content-type") ?? "", /^image\//);
-  response = await request(`/${phpApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(videoApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Range: "bytes=0-7" } });
+  expectStatus(response.status, 206, "gateway random video range call", await response.arrayBuffer());
+  assert.equal(response.headers.get("content-range"), `bytes 0-7/${tinyMp4.length}`);
+  assert.equal(response.headers.get("accept-ranges"), "bytes");
+  assert.equal(response.headers.get("content-type"), "video/mp4");
+  response = await request(phpApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "isolated PHP gateway call", await response.text());
-  response = await request(`/${builtinApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(builtinApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "built-in API gateway call", await response.text());
-  response = await request(`/${localApi.slug}`, { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(localApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   const localResponse = await response.json();
   expectStatus(response.status, 200, "server-local exact-address gateway call", localResponse);
   assert.equal(localResponse.path, "/fixed/", "exact-address mode must not append the public route path");
-  response = await request("/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(externalApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
-  response = await request("/github/gitignore/raw/main/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(redirectApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "redirected external upstream gateway call", await response.text());
-  response = await request("/LICENSE", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  response = await request(tunnelApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "tunnel upstream gateway call", await response.text());
   response = await request(quickApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "quick-created API gateway call", await response.text());
-  response = await request(`/${textApi.slug}`, { headers: { Authorization: "Bearer invalid-key" } }, "", apiUrl);
+  response = await request(textApi.endpoint, { headers: { Authorization: "Bearer invalid-key" } });
   expectStatus(response.status, 401, "invalid API key rejected", await response.text());
 
   result = await jsonRequest("/api/v1/admin/apis/statistics", {}, adminCookie);

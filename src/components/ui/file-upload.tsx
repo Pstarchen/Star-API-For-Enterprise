@@ -23,6 +23,7 @@ export function FileUploadField({ name, title, description, accept, required = f
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const selected = files.length > 0;
+  const selectedSummary = selected ? fileSummary(files) : description;
 
   function update(next: File[]) {
     if (maxBytes && next.some((file) => file.size > maxBytes)) {
@@ -48,7 +49,7 @@ export function FileUploadField({ name, title, description, accept, required = f
       <span className="file-upload-icon">{selected ? <CheckCircle2 /> : icon ?? <UploadCloud />}</span>
       <span className="min-w-0 flex-1 text-left">
         <strong>{selected ? multiple ? `${files.length} 个文件已就绪` : files[0].name : title}</strong>
-        <small>{selected ? files.map((file) => `${file.name} · ${formatBytes(file.size)}`).join("，") : description}</small>
+        <small>{selectedSummary}</small>
       </span>
       <span className="file-upload-action">{selected ? <><FileUp />重新选择</> : <><UploadCloud />选择文件</>}</span>
     </label>
@@ -61,5 +62,13 @@ export function FileUploadField({ name, title, description, accept, required = f
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function fileSummary(files: File[]) {
+  const total = files.reduce((sum, file) => sum + file.size, 0);
+  if (files.length === 1) return `${files[0].name} · ${formatBytes(total)}`;
+  const names = files.slice(0, 3).map((file) => file.name).join("，");
+  return `${names}${files.length > 3 ? ` 等 ${files.length} 个文件` : ""} · 共 ${formatBytes(total)}`;
 }

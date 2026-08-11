@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Braces, CheckCircle2, ChevronDown, CircleAlert, Download, FileCode2, FileImage, Globe2, Library, Link2, Loader2, Plus, Search, Settings2, ShieldCheck, Tags, Trash2, Type, Upload, WandSparkles, X } from "lucide-react";
+import { Boxes, Braces, CheckCircle2, ChevronDown, CircleAlert, Download, FileCode2, FileImage, FileVideo, Globe2, Library, Link2, Loader2, Plus, Search, Settings2, ShieldCheck, Tags, Trash2, Type, Upload, WandSparkles, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiSlugFromName, buildPublicApiUrl, normalizePublicPath } from "@/lib/api-routes";
 import type { ApiCategoryOption, CatalogProduct } from "@/lib/catalog";
@@ -17,7 +17,7 @@ import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "./ui/table";
 
-type SourceType = "RANDOM_IMAGE" | "RANDOM_TEXT" | "STATIC_JSON" | "PHP_PACKAGE" | "EXTERNAL" | "SERVER_LOCAL" | "TUNNEL" | "BUILTIN";
+type SourceType = "RANDOM_IMAGE" | "RANDOM_VIDEO" | "RANDOM_TEXT" | "STATIC_JSON" | "PHP_PACKAGE" | "EXTERNAL" | "SERVER_LOCAL" | "TUNNEL" | "BUILTIN";
 type AssetView = { id: string; kind: string; name: string; mimeType: string; size: number; createdAt: string; preview: string | null };
 
 const statusNames = { DRAFT: "草稿", REVIEW: "审核中", GRAY: "灰度中", PUBLISHED: "已发布", DEPRECATED: "已弃用", OFFLINE: "已下线" } as const;
@@ -25,6 +25,7 @@ const inputClass = "h-10 w-full rounded-[8px] border border-[var(--line)] bg-[va
 const textareaClass = "w-full rounded-[8px] border border-[var(--line)] bg-[var(--surface)] p-3 text-[11px] leading-5 outline-none focus:border-[var(--brand)]";
 const sourceOptions = [
   { id: "RANDOM_IMAGE", name: "随机图片", description: "上传多张图片，每次调用随机返回一张", icon: FileImage, tone: "bg-[var(--accent-soft)] text-[var(--accent)]" },
+  { id: "RANDOM_VIDEO", name: "随机视频", description: "视频保存在服务器本地卷，支持分段播放与下载", icon: FileVideo, tone: "bg-[var(--warning-soft)] text-[var(--warning)]" },
   { id: "RANDOM_TEXT", name: "随机文本", description: "录入多行文本或上传 TXT，每次返回一条", icon: Type, tone: "bg-[var(--aqua-soft)] text-[var(--aqua)]" },
   { id: "STATIC_JSON", name: "固定 JSON", description: "配置一个 JSON 响应，适合公告和静态数据", icon: Braces, tone: "bg-[var(--brand-soft)] text-[var(--brand)]" },
   { id: "PHP_PACKAGE", name: "PHP 程序包", description: "上传 PHP 与附属文件 ZIP，在隔离容器运行", icon: FileCode2, tone: "bg-[var(--brand-soft)] text-[var(--brand)]" },
@@ -53,6 +54,7 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
   const [configApi, setConfigApi] = useState<CatalogProduct | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [categoryOpen, setCategoryOpen] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState("");
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
@@ -61,13 +63,13 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
 
   function selectSource(next: SourceType) {
     setSourceType(next);
-    if (["RANDOM_IMAGE", "RANDOM_TEXT", "STATIC_JSON"].includes(next)) setMethod("GET");
+    if (["RANDOM_IMAGE", "RANDOM_VIDEO", "RANDOM_TEXT", "STATIC_JSON"].includes(next)) setMethod("GET");
     if (next === "PHP_PACKAGE") setMethod("ALL");
     if (next === "BUILTIN") setMethod(internalHandlerTemplates.find((item) => item.id === builtinHandler)?.methods[0] ?? "GET");
   }
 
   async function createApi(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setSaving(true); setError("");
+    event.preventDefault(); setSaving(true); setError(""); setUploadProgress("");
     const form = new FormData(event.currentTarget);
     const value = (name: string) => String(form.get(name) ?? "").trim();
     const quickMode = value("creationMode") === "quick";
@@ -117,7 +119,8 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
     };
     const payload = new FormData();
     payload.append("config", JSON.stringify(config));
-    for (const item of form.getAll("assets")) if (item instanceof File && item.size) payload.append("assets", item);
+    const mediaFiles = ["RANDOM_IMAGE", "RANDOM_VIDEO"].includes(sourceType) ? form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0) : [];
+    if (!mediaFiles.length) for (const item of form.getAll("assets")) if (item instanceof File && item.size) payload.append("assets", item);
     try {
       const response = await fetch("/api/v1/admin/apis", { method: "POST", body: payload });
       const result = await response.json();
@@ -125,11 +128,26 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
         const fieldErrors = result.details?.fieldErrors ? Object.values(result.details.fieldErrors).flat().filter(Boolean).join("；") : "";
         setError(fieldErrors || result.message || "API 创建失败"); return;
       }
-      setApis((current) => [result.data, ...current]);
-      setNotice(`${result.data.name} 已创建为草稿`);
+      let uploaded = 0;
+      let uploadFailure = "";
+      if (mediaFiles.length) {
+        for (const file of mediaFiles) {
+          setUploadProgress(`正在上传 ${uploaded + 1} / ${mediaFiles.length}：${file.name}`);
+          try {
+            const mediaResponse = await fetch(`/api/v1/admin/apis/media?productId=${encodeURIComponent(result.data.id)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
+            const mediaResult = await mediaResponse.json();
+            if (!mediaResponse.ok) { uploadFailure = `${file.name}：${mediaResult.message || "上传失败"}`; break; }
+            uploaded += 1;
+          } catch { uploadFailure = `${file.name}：无法连接媒体上传服务`; break; }
+        }
+      }
+      const created = { ...result.data, assetCount: uploaded || result.data.assetCount };
+      setApis((current) => [created, ...current]);
+      setNotice(uploaded ? `${created.name} 已创建，成功上传 ${uploaded} 个媒体文件` : `${created.name} 已创建为草稿`);
       setDialogOpen(false);
+      if (uploadFailure) setError(`API 草稿已保留，已上传 ${uploaded} 个文件；${uploadFailure}。可在“管理返回内容”中继续上传。`);
     } catch { setError("无法连接 API 管理服务"); }
-    finally { setSaving(false); }
+    finally { setSaving(false); setUploadProgress(""); }
   }
 
   async function changeStatus(api: CatalogProduct, status: CatalogProduct["status"]) {
@@ -172,7 +190,7 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
       {!filtered.length && <EmptyState icon={Boxes} title="暂无 API" description="可以从随机图片、文本、JSON 或外部接口开始创建。" />}
       <div className="border-t border-[var(--line)] px-4 py-3 text-[9px] text-[var(--muted)]">共 {filtered.length} 条真实记录</div>
     </section>
-    {dialogOpen && <CreateDialog categories={categories.filter((category) => category.enabled)} canPublish={canPublish} defaultPublicHost={defaultPublicHost} defaultPublicUrl={defaultPublicUrl} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
+    {dialogOpen && <CreateDialog categories={categories.filter((category) => category.enabled)} canPublish={canPublish} defaultPublicHost={defaultPublicHost} defaultPublicUrl={defaultPublicUrl} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} uploadProgress={uploadProgress} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
     {contentApi && <ContentManager api={contentApi} close={() => setContentApi(null)} changed={(count) => setApis((items) => items.map((item) => item.id === contentApi.id ? { ...item, assetCount: count } : item))} />}
     {configApi && <ApiConfigManager api={configApi} categories={categories} close={() => setConfigApi(null)} updated={(next) => { setApis((items) => items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items]); setConfigApi(next); }} />}
     {importOpen && <OpenApiImportDialog categories={categories.filter((category) => category.enabled)} defaultPublicHost={defaultPublicHost} close={() => setImportOpen(false)} imported={(next, message) => { setApis((items) => [next, ...items]); setNotice(message); setImportOpen(false); }} />}
@@ -194,7 +212,7 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
 
 type RouteCheckState = { status: "idle" | "checking" | "available" | "conflict" | "error"; message: string };
 
-function CreateDialog(props: { categories: ApiCategoryOption[]; canPublish: boolean; defaultPublicHost: string; defaultPublicUrl: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
+function CreateDialog(props: { categories: ApiCategoryOption[]; canPublish: boolean; defaultPublicHost: string; defaultPublicUrl: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; uploadProgress: string; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
   const [mode, setMode] = useState<"quick" | "full">("quick");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -244,7 +262,7 @@ function CreateDialog(props: { categories: ApiCategoryOption[]; canPublish: bool
 
   const publicPathField = <Field label="公开路径"><input name="publicPath" required value={publicPath} onChange={(event) => { setPathEdited(true); setPublicPath(event.target.value); }} onBlur={() => setPublicPath(normalizePublicPath(publicPath))} className={inputClass} placeholder="/api/sjbz" /></Field>;
   const routeFields = <>
-    <Field label="API 域名"><input name="publicHost" required value={publicHost} onChange={(event) => setPublicHost(event.target.value.toLowerCase())} className={inputClass} placeholder="api.example.com" /></Field>
+    <Field label="访问域名"><input name="publicHost" required value={publicHost} onChange={(event) => setPublicHost(event.target.value.toLowerCase())} className={inputClass} placeholder="example.com" /></Field>
     {publicPathField}
     <Field label="接口版本"><input name="version" value={version} onChange={(event) => setVersion(event.target.value)} className={inputClass} /></Field>
     <Field label="可见范围"><select name="visibility" defaultValue="PUBLIC" className={inputClass}><option value="PUBLIC">公开市场</option><option value="PRIVATE">指定企业</option><option value="GRAY">灰度测试</option><option value="INTERNAL">仅内部网关</option></select></Field>
@@ -256,11 +274,12 @@ function CreateDialog(props: { categories: ApiCategoryOption[]; canPublish: bool
     <Section title="返回内容"><SourceFields {...props} quick={mode === "quick"} selectedTemplate={selectedTemplate} /></Section>
     <Section title="收费方式"><div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => props.setBillingMode("FREE")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "FREE" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">免费调用</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">仍会记录调用量并执行 QPS 和月配额限制。</span></button><button type="button" onClick={() => props.setBillingMode("PER_REQUEST")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "PER_REQUEST" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">按成功请求收费</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">只有 2xx/3xx 成功响应产生费用，失败请求不收费。</span></button></div>{props.billingMode === "PER_REQUEST" && <div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label="单价（元/次）"><input name="unitPrice" required type="number" min="0.000001" step="0.000001" className={inputClass} placeholder="0.01" /></Field><Field label="每月免费次数" optional><input name="freeQuotaMonthly" type="number" min="0" defaultValue="0" className={inputClass} /></Field></div>}</Section>
     {mode === "full" ? <section className="rounded-[8px] border border-[var(--line)]"><button type="button" onClick={() => props.setAdvancedOpen(!props.advancedOpen)} className="flex w-full items-center justify-between px-4 py-3 text-left"><span><strong className="block text-[11px]">高级设置</strong><span className="mt-0.5 block text-[9px] text-[var(--muted)]">说明、分类、服务商、QPS、SLA 和安全策略均可按需配置</span></span><ChevronDown className={`size-4 transition ${props.advancedOpen ? "rotate-180" : ""}`} /></button>{props.advancedOpen && <AdvancedFields />}</section> : <div className="flex items-start gap-3 rounded-[8px] bg-[var(--aqua-soft)] px-4 py-3 text-[9px] leading-4 text-[var(--aqua)]"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><span>默认启用调用日志与 CORS，QPS 为 10，版本为 v1，并根据部署地址自动决定是否强制 HTTPS。创建后可随时进入路由配置调整。</span></div>}
-    {props.error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{props.error}</p>}</div><div className="flex justify-end gap-2 border-t border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-4"><Button type="button" onClick={props.close} variant="secondary" size="sm">取消</Button><Button disabled={props.saving || displayedRouteCheck.status === "checking" || displayedRouteCheck.status === "conflict"} size="sm">{props.saving && <Loader2 className="animate-spin" />}{props.saving ? "正在创建" : "创建 API 草稿"}</Button></div></form></DialogContent></Dialog>;
+    {props.uploadProgress && <p role="status" className="rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2.5 text-[10px] text-[var(--aqua)]">{props.uploadProgress}</p>}{props.error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{props.error}</p>}</div><div className="flex justify-end gap-2 border-t border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-4"><Button type="button" onClick={props.close} disabled={props.saving} variant="secondary" size="sm">取消</Button><Button disabled={props.saving || displayedRouteCheck.status === "checking" || displayedRouteCheck.status === "conflict"} size="sm">{props.saving && <Loader2 className="animate-spin" />}{props.uploadProgress ? "正在上传媒体" : props.saving ? "正在创建" : "创建 API 草稿"}</Button></div></form></DialogContent></Dialog>;
 }
 
 function SourceFields(props: { sourceType: SourceType; quick: boolean; authType: string; setAuthType: (value: string) => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; selectedTemplate: typeof internalHandlerTemplates[number] }) {
-  if (props.sourceType === "RANDOM_IMAGE") return <AssetPicker name="assets" accept="image/png,image/jpeg,image/webp,image/gif" multiple required title="选择本地图片" description="支持 PNG、JPEG、WebP、GIF，可多选；每张最大 8 MB" />;
+  if (props.sourceType === "RANDOM_IMAGE") return <AssetPicker name="assets" accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple required title="选择本地图片" description="支持 PNG、JPEG、WebP、GIF；不设单文件上限，上传后校验真实格式" icon={<FileImage />} />;
+  if (props.sourceType === "RANDOM_VIDEO") return <AssetPicker name="assets" accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,.mp4,.m4v,.webm,.mov,.mkv,.avi" multiple required title="选择本地视频" description="支持 MP4、M4V、WebM、MOV、MKV、AVI；存入服务器持久卷并支持 Range 播放" icon={<FileVideo />} />;
   if (props.sourceType === "RANDOM_TEXT") return <div className="space-y-4"><Field label="文本内容"><textarea name="content" rows={7} className={textareaClass} placeholder={"每行一条内容\n调用时会随机返回其中一行\n也可以只上传 TXT 文件"} /></Field><Field label="上传 TXT 文件" optional><input name="assets" type="file" accept=".txt,text/plain" multiple className={inputClass} /></Field></div>;
   if (props.sourceType === "STATIC_JSON") return <div className="space-y-4"><Field label="JSON 内容"><textarea name="content" rows={9} className={`${textareaClass} mono`} placeholder={'{\n  "message": "hello",\n  "success": true\n}'} /></Field><Field label="或上传 JSON 文件" optional><input name="assets" type="file" accept=".json,application/json" className={inputClass} /></Field></div>;
   if (props.sourceType === "PHP_PACKAGE") return <div className="space-y-4"><label className="flex min-h-32 cursor-pointer flex-col items-center justify-center rounded-[8px] border border-dashed border-[var(--line-strong)] bg-[var(--surface-subtle)] p-5 text-center hover:border-[var(--brand)]"><FileCode2 className="size-6 text-[var(--brand)]" /><strong className="mt-3 text-[11px]">选择 PHP 程序包</strong><span className="mt-1 text-[9px] text-[var(--muted)]">上传包含 PHP 源码与附属文件的 ZIP；程序在独立受限容器内运行</span><input name="assets" required type="file" accept=".zip,application/zip,application/x-zip-compressed" className="mt-3 block max-w-full text-[9px]" /></label><div className="grid gap-4 sm:grid-cols-2"><Field label="入口文件"><input name="entryFile" defaultValue="index.php" className={inputClass} placeholder="index.php" /></Field><Field label="接受的请求方法"><select value={props.method} onChange={(event) => props.setMethod(event.target.value)} className={inputClass}><option value="ALL">全部方法</option><option>GET</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option></select></Field></div></div>;
@@ -303,28 +322,61 @@ function AdvancedFields() {
 
 function ContentManager({ api, close, changed }: { api: CatalogProduct; close: () => void; changed: (count: number) => void }) {
   const [assets, setAssets] = useState<AssetView[] | null>(null);
+  const [total, setTotal] = useState(api.assetCount);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [mediaInputKey, setMediaInputKey] = useState(0);
+  async function refresh() {
+    const response = await fetch(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(api.id)}`);
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.message || "无法加载 API 内容");
+    const nextTotal = Number(result.meta?.total ?? result.data.length);
+    setAssets(result.data); setTotal(nextTotal); changed(nextTotal);
+  }
   useEffect(() => {
     let active = true;
     void fetch(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(api.id)}`)
       .then((response) => response.json().then((result) => ({ response, result })))
-      .then(({ response, result }) => { if (!active) return; if (response.ok) setAssets(result.data); else setError(result.message); })
+      .then(({ response, result }) => { if (!active) return; if (response.ok) { setAssets(result.data); setTotal(Number(result.meta?.total ?? result.data.length)); } else setError(result.message); })
       .catch(() => { if (active) setError("无法加载 API 内容"); });
     return () => { active = false; };
   }, [api.id]);
-  async function add(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const formElement = event.currentTarget; setSaving(true); setError(""); const form = new FormData(formElement); form.append("productId", api.id); const response = await fetch("/api/v1/admin/apis/assets", { method: "POST", body: form }); const result = await response.json(); setSaving(false); if (!response.ok) { setError(result.message); return; } setMessage(result.message); formElement.reset(); const refreshed = await fetch(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(api.id)}`); const refreshedResult = await refreshed.json(); if (refreshed.ok) { setAssets(refreshedResult.data); changed(refreshedResult.data.length); } }
-  async function remove(asset: AssetView) { if (!window.confirm(`删除“${asset.preview || asset.name}”？`)) return; const response = await fetch(`/api/v1/admin/apis/assets?id=${encodeURIComponent(asset.id)}`, { method: "DELETE" }); const result = await response.json(); if (!response.ok) { setError(result.message); return; } setAssets((items) => { const next = items?.filter((item) => item.id !== asset.id) ?? []; changed(next.length); return next; }); setMessage(result.message); }
+  async function add(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); const formElement = event.currentTarget; setSaving(true); setError(""); setMessage("");
+    const form = new FormData(formElement);
+    const media = ["content.random-image", "content.random-video"].includes(api.internalHandler ?? "");
+    if (media) {
+      const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
+      let uploaded = 0;
+      for (const file of files) {
+        setMessage(`正在上传 ${uploaded + 1} / ${files.length}：${file.name}`);
+        try {
+          const response = await fetch(`/api/v1/admin/apis/media?productId=${encodeURIComponent(api.id)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
+          const result = await response.json();
+          if (!response.ok) { setError(`${file.name}：${result.message || "上传失败"}`); break; }
+          uploaded += 1;
+        } catch { setError(`${file.name}：无法连接媒体上传服务`); break; }
+      }
+      if (uploaded) { setMessage(`已上传 ${uploaded} 个媒体文件`); setMediaInputKey((value) => value + 1); await refresh().catch((error) => setError(error.message)); }
+      setSaving(false); return;
+    }
+    form.append("productId", api.id);
+    const response = await fetch("/api/v1/admin/apis/assets", { method: "POST", body: form });
+    const result = await response.json(); setSaving(false);
+    if (!response.ok) { setError(result.message); return; }
+    setMessage(result.message); formElement.reset(); await refresh().catch((error) => setError(error.message));
+  }
+  async function remove(asset: AssetView) { if (!window.confirm(`删除“${asset.preview || asset.name}”？`)) return; const response = await fetch(`/api/v1/admin/apis/assets?id=${encodeURIComponent(asset.id)}`, { method: "DELETE" }); const result = await response.json(); if (!response.ok) { setError(result.message); return; } setAssets((items) => items?.filter((item) => item.id !== asset.id) ?? []); setTotal((value) => { const next = Math.max(0, value - 1); changed(next); return next; }); setMessage(result.message); }
   const handler = api.internalHandler;
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4" onMouseDown={close}><div className="mx-auto my-6 w-full max-w-3xl overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">{handler === phpHandlerId ? "管理 PHP 程序包" : "管理返回内容"}</h3><p className="mt-1 text-[9px] text-[var(--muted)]">{api.name} · 当前 {assets?.length ?? api.assetCount} 项</p></div><button onClick={close} className="grid size-8 place-items-center rounded-[7px] hover:bg-[var(--surface-subtle)]" aria-label="关闭"><X className="size-4" /></button></div><form onSubmit={add} className="space-y-4 border-b border-[var(--line)] p-5">{handler === "content.random-image" && <Field label="继续添加图片"><input name="assets" required type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple className={inputClass} /></Field>}{handler === "content.random-text" && <><Field label="继续添加文本"><textarea name="content" rows={4} className={textareaClass} placeholder="每行一条" /></Field><Field label="或上传 TXT" optional><input name="assets" type="file" accept=".txt,text/plain" multiple className={inputClass} /></Field></>}{handler === "content.static-json" && <><Field label="替换 JSON 响应"><textarea name="content" rows={7} className={`${textareaClass} mono`} placeholder={'{"message":"updated"}'} /></Field><Field label="或上传 JSON" optional><input name="assets" type="file" accept=".json,application/json" className={inputClass} /></Field></>}{handler === phpHandlerId && <><Field label="替换整个 PHP 程序包"><input name="assets" required type="file" accept=".zip,application/zip,application/x-zip-compressed" className={inputClass} /></Field><Field label="入口文件"><input name="entryFile" defaultValue="index.php" className={inputClass} /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">新 ZIP 校验通过后会原子替换当前程序包，不会留下新旧文件混用状态。</p></>}{message && <p role="status" className="rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2 text-[10px] text-[var(--aqua)]">{message}</p>}{error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}<button disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-60">{saving ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}{handler === phpHandlerId ? "部署新程序包" : handler === "content.static-json" ? "更新 JSON" : "添加内容"}</button></form><div className="max-h-80 overflow-y-auto divide-y divide-[var(--line)]">{assets?.map((asset) => <div key={asset.id} className="flex items-center gap-3 px-5 py-3"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--surface-subtle)]">{asset.kind === "IMAGE" ? <FileImage className="size-4" /> : asset.kind === "JSON" ? <Braces className="size-4" /> : asset.kind === "PHP_SOURCE" ? <FileCode2 className="size-4" /> : <Type className="size-4" />}</span><div className="min-w-0 flex-1"><strong className="block truncate text-[10px]">{asset.preview || asset.name}</strong><span className="mt-0.5 block text-[8px] text-[var(--muted)]">{formatBytes(asset.size)} · {new Date(asset.createdAt).toLocaleString("zh-CN")}</span></div>{handler !== phpHandlerId && <button onClick={() => remove(asset)} className="grid size-8 place-items-center rounded-[7px] text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]" aria-label={`删除 ${asset.name}`}><Trash2 className="size-3.5" /></button>}</div>)}{assets?.length === 0 && <div className="py-12 text-center text-[10px] text-[var(--muted)]">当前没有可返回的内容</div>}{assets === null && !error && <div className="grid place-items-center py-12"><Loader2 className="size-5 animate-spin text-[var(--brand)]" /></div>}</div></div></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4" onMouseDown={close}><div className="mx-auto my-6 w-full max-w-3xl overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">{handler === phpHandlerId ? "管理 PHP 程序包" : "管理返回内容"}</h3><p className="mt-1 text-[9px] text-[var(--muted)]">{api.name} · 当前 {total} 项</p></div><button onClick={close} className="grid size-8 place-items-center rounded-[7px] hover:bg-[var(--surface-subtle)]" aria-label="关闭"><X className="size-4" /></button></div><form onSubmit={add} className="space-y-4 border-b border-[var(--line)] p-5">{handler === "content.random-image" && <FileUploadField key={`image-${mediaInputKey}`} name="assets" required accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple title="继续添加图片" description="不设单文件上限；平台会校验真实图片格式后写入本地持久卷" icon={<FileImage />} />}{handler === "content.random-video" && <FileUploadField key={`video-${mediaInputKey}`} name="assets" required accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,.mp4,.m4v,.webm,.mov,.mkv,.avi" multiple title="继续添加视频" description="支持批量选择并逐个流式上传；视频支持 Range 分段播放" icon={<FileVideo />} />}{handler === "content.random-text" && <><Field label="继续添加文本"><textarea name="content" rows={4} className={textareaClass} placeholder="每行一条" /></Field><Field label="或上传 TXT" optional><input name="assets" type="file" accept=".txt,text/plain" multiple className={inputClass} /></Field></>}{handler === "content.static-json" && <><Field label="替换 JSON 响应"><textarea name="content" rows={7} className={`${textareaClass} mono`} placeholder={'{"message":"updated"}'} /></Field><Field label="或上传 JSON" optional><input name="assets" type="file" accept=".json,application/json" className={inputClass} /></Field></>}{handler === phpHandlerId && <><Field label="替换整个 PHP 程序包"><input name="assets" required type="file" accept=".zip,application/zip,application/x-zip-compressed" className={inputClass} /></Field><Field label="入口文件"><input name="entryFile" defaultValue="index.php" className={inputClass} /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">新 ZIP 校验通过后会原子替换当前程序包，不会留下新旧文件混用状态。</p></>}{message && <p role="status" className="rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2 text-[10px] text-[var(--aqua)]">{message}</p>}{error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}<button disabled={saving} className="inline-flex h-9 items-center gap-2 rounded-[8px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-60">{saving ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}{handler === phpHandlerId ? "部署新程序包" : handler === "content.static-json" ? "更新 JSON" : saving && ["content.random-image", "content.random-video"].includes(handler ?? "") ? "正在上传" : "添加内容"}</button></form>{total > (assets?.length ?? 0) && <div className="border-b border-[var(--line)] px-5 py-2 text-[9px] text-[var(--muted)]">当前显示最近 {assets?.length ?? 0} 项，共 {total} 项</div>}<div className="max-h-80 overflow-y-auto divide-y divide-[var(--line)]">{assets?.map((asset) => <div key={asset.id} className="flex items-center gap-3 px-5 py-3"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--surface-subtle)]">{asset.kind === "IMAGE" ? <FileImage className="size-4" /> : asset.kind === "VIDEO" ? <FileVideo className="size-4" /> : asset.kind === "JSON" ? <Braces className="size-4" /> : asset.kind === "PHP_SOURCE" ? <FileCode2 className="size-4" /> : <Type className="size-4" />}</span><div className="min-w-0 flex-1"><strong className="block truncate text-[10px]">{asset.preview || asset.name}</strong><span className="mt-0.5 block text-[8px] text-[var(--muted)]">{formatBytes(asset.size)} · {new Date(asset.createdAt).toLocaleString("zh-CN")}</span></div>{handler !== phpHandlerId && <button onClick={() => remove(asset)} className="grid size-8 place-items-center rounded-[7px] text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]" aria-label={`删除 ${asset.name}`}><Trash2 className="size-3.5" /></button>}</div>)}{assets?.length === 0 && <div className="py-12 text-center text-[10px] text-[var(--muted)]">当前没有可返回的内容</div>}{assets === null && !error && <div className="grid place-items-center py-12"><Loader2 className="size-5 animate-spin text-[var(--brand)]" /></div>}</div></div></div>;
 }
 
-function AssetPicker({ name, accept, multiple = false, required = false, title, description }: { name: string; accept: string; multiple?: boolean; required?: boolean; title: string; description: string }) {
-  return <FileUploadField name={name} required={required} accept={accept} multiple={multiple} maxBytes={8 * 1024 * 1024} title={title} description={description} icon={<FileImage />} />;
+function AssetPicker({ name, accept, multiple = false, required = false, title, description, icon }: { name: string; accept: string; multiple?: boolean; required?: boolean; title: string; description: string; icon: React.ReactNode }) {
+  return <FileUploadField name={name} required={required} accept={accept} multiple={multiple} title={title} description={description} icon={icon} />;
 }
 
-function executionLabel(api: CatalogProduct) { if (api.internalHandler === "content.random-image") return "随机图片"; if (api.internalHandler === "content.random-text") return "随机文本"; if (api.internalHandler === "content.static-json") return "固定 JSON"; if (api.internalHandler === phpHandlerId) return "PHP 程序包"; if (api.upstreamType === "PUBLIC_API") return "公网 API"; if (api.upstreamType === "SERVER_LOCAL") return "服务器内网"; if (api.upstreamType === "TUNNEL") return "临时穿透"; return "内置工具"; }
-function formatBytes(value: number) { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`; return `${(value / 1024 / 1024).toFixed(1)} MB`; }
+function executionLabel(api: CatalogProduct) { if (api.internalHandler === "content.random-image") return "随机图片"; if (api.internalHandler === "content.random-video") return "随机视频"; if (api.internalHandler === "content.random-text") return "随机文本"; if (api.internalHandler === "content.static-json") return "固定 JSON"; if (api.internalHandler === phpHandlerId) return "PHP 程序包"; if (api.upstreamType === "PUBLIC_API") return "公网 API"; if (api.upstreamType === "SERVER_LOCAL") return "服务器内网"; if (api.upstreamType === "TUNNEL") return "临时穿透"; return "内置工具"; }
+function formatBytes(value: number) { if (value < 1024) return `${value} B`; if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`; if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`; return `${(value / 1024 / 1024 / 1024).toFixed(2)} GB`; }
 function Section({ title, children }: { title: string; children: React.ReactNode }) { return <section><h4 className="mb-3 text-[11px] font-bold">{title}</h4>{children}</section>; }
 function Field({ label, optional = false, children }: { label: string; optional?: boolean; children: React.ReactNode }) { return <label className="block"><span className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold">{label}{optional && <em className="not-italic font-normal text-[var(--muted)]">可选</em>}</span>{children}</label>; }

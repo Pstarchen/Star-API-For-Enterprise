@@ -34,10 +34,12 @@ yarn-error.log*
 .env*
 !.env.example
 !.env.docker.example
+!.env.production.example
 
 # local runtime logs and database exports
 /*.log
 /backups/
+/.data/
 
 # vercel
 .vercel

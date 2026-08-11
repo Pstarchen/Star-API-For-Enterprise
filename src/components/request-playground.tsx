@@ -21,6 +21,7 @@ type ResponseMetadata = {
 type PlaygroundResponse = ResponseMetadata & (
   | { kind: "text"; text: string }
   | { kind: "image"; url: string }
+  | { kind: "video"; url: string }
   | { kind: "binary"; url: string }
 );
 
@@ -58,6 +59,11 @@ function extensionFor(contentType: string) {
     "image/bmp": "bmp",
     "image/avif": "avif",
     "image/svg+xml": "svg",
+    "video/mp4": "mp4",
+    "video/webm": "webm",
+    "video/quicktime": "mov",
+    "video/x-matroska": "mkv",
+    "video/x-msvideo": "avi",
     "application/json": "json",
     "text/plain": "txt",
   };
@@ -97,7 +103,7 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
 
   useEffect(() => {
     return () => {
-      if (response?.kind === "image" || response?.kind === "binary") URL.revokeObjectURL(response.url);
+      if (response?.kind === "image" || response?.kind === "video" || response?.kind === "binary") URL.revokeObjectURL(response.url);
     };
   }, [response]);
 
@@ -116,7 +122,7 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
     const controller = new AbortController();
     requestControllerRef.current = controller;
     let timedOut = false;
-    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, requestTimeoutMs);
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, api.internalHandler === "content.random-video" ? 5 * 60_000 : requestTimeoutMs);
     const started = performance.now();
 
     try {
@@ -125,7 +131,7 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
       const result = await fetch(`${gatewayUrl}${suffix}`, {
         method: api.method,
         headers: {
-          Accept: "application/json, text/plain, image/*, */*",
+          Accept: "application/json, text/plain, image/*, video/*, */*",
           Authorization: `Bearer ${apiKey}`,
           ...(requestBody ? { "Content-Type": "application/json" } : {}),
         },
@@ -152,6 +158,9 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
       if (imageType) {
         const url = URL.createObjectURL(new Blob([buffer], { type: imageType }));
         setResponse({ ...metadata, kind: "image", url });
+      } else if (declaredType.startsWith("video/")) {
+        const url = URL.createObjectURL(new Blob([buffer], { type: declaredType }));
+        setResponse({ ...metadata, kind: "video", url });
       } else if (isTextResponse(declaredType)) {
         const text = decodeText(bytes, result.headers.get("content-type") ?? "");
         let formatted = text;
@@ -204,5 +213,6 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
 function ResponseBody({ response }: { response: PlaygroundResponse }) {
   if (response.kind === "text") return <pre data-testid="playground-text-response" className="mono max-h-[520px] overflow-auto p-5 text-[10px] leading-6 text-[#c8e8dd]"><code>{response.text || "(空响应)"}</code></pre>;
   if (response.kind === "image") return <div data-testid="playground-image-response" className="p-4"><div className="relative min-h-[340px] overflow-hidden rounded-[7px] border border-white/10 bg-[linear-gradient(45deg,#1b1d29_25%,transparent_25%),linear-gradient(-45deg,#1b1d29_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#1b1d29_75%),linear-gradient(-45deg,transparent_75%,#1b1d29_75%)] bg-[length:20px_20px] bg-[position:0_0,0_10px,10px_-10px,-10px_0px]"><Image src={response.url} alt="API 返回的图片" fill unoptimized sizes="(min-width: 1024px) 50vw, 100vw" className="object-contain" /></div></div>;
+  if (response.kind === "video") return <div data-testid="playground-video-response" className="p-4"><video src={response.url} controls playsInline preload="metadata" className="max-h-[480px] w-full rounded-[7px] bg-black" /></div>;
   return <div data-testid="playground-binary-response" className="grid min-h-[370px] place-items-center p-5 text-center"><div><FileDown className="mx-auto size-8 text-white/25" /><p className="mt-3 text-[11px] text-white/65">已识别为二进制响应</p><p className="mt-1 text-[9px] text-white/40">{response.filename} · {formatBytes(response.size)}</p><a href={response.url} download={response.filename} className="mt-4 inline-flex h-9 items-center gap-2 rounded-[6px] bg-white/10 px-4 text-[10px] font-semibold hover:bg-white/15"><Download className="size-3.5" />下载文件</a></div></div>;
 }

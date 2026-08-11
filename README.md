@@ -9,6 +9,7 @@
 - 账户体系：首次安装向导、个人/企业注册、scrypt 密码哈希、持久会话、登录限流与工作空间切换
 - 平台品牌：安装时配置网站名称、介绍、公开地址和图标，管理员可在后台维护网站图标、首屏图片及备案信息并同步到门户、控制台与浏览器元数据
 - API 分类：管理员可新增、排序、启停和删除未使用分类，API 新建、编辑、OpenAPI 导入及市场筛选共用同一套真实分类数据
+- 本地媒体 API：图片和视频流式上传到 Docker 持久卷，校验真实文件格式；随机视频支持 HTTP Range 分段播放，不依赖第三方对象存储
 - 用户控制台：调用概览、应用/密钥、请求日志、Webhook 与账单；企业空间额外承载成员权限和组织设置
 - 运营后台：个人/企业用户管理、API 生命周期、服务商准入、企业组织、风控、审计、网关监控与平台设置
 - 服务端接口：目录查询、沙箱调用、密钥生成、健康检查，统一使用 Zod 校验
@@ -27,12 +28,22 @@ npm run dev
 
 ```bash
 cp .env.docker.example .env
-# 使用 openssl rand -hex 32 分别替换 .env 中的四个敏感变量
+# 使用 openssl rand -hex 32 分别替换 .env 中的敏感变量
 docker compose config
 docker compose up -d --build
 ```
 
 启动后访问配置的 `SITE_ADDRESS`，首次进入 `/install` 创建平台管理员。健康检查地址为 `/api/health`，升级、备份、回滚和 HTTPS 说明见 [Docker 部署指南](docs/DEPLOYMENT.md)。
+
+生产环境推荐使用版本镜像和宿主机反向代理：
+
+```bash
+cp .env.production.example .env.production
+docker compose --env-file .env.production -f compose.production.yml pull
+docker compose --env-file .env.production -f compose.production.yml up -d
+```
+
+只需修改 `.env.production` 中的 `STAR_API_VERSION` 即可同步升级应用、迁移器和 PHP Runner。GHCR 发布、Nginx/Caddy 反代、备份和回滚步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
 
 需要启用数据库时：
 
@@ -61,6 +72,7 @@ src/components/          设计系统与业务组件
 src/lib/server/          仅服务端可用的密钥与数据库模块
 prisma/schema.prisma     多租户领域模型
 docker-compose.yml       PostgreSQL 与 Redis 本地基础设施
+compose.production.yml   版本镜像与外部反代生产编排
 ```
 
 页面默认是 Server Component；仅搜索、图表、表单、弹窗等交互组件使用 Client Component。这样可以控制客户端体积，并保持后续迁移到真实仓储层时的边界清晰。

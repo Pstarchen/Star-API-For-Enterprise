@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
 import { getCurrentUser } from "@/lib/server/auth";
 import { parseHeroDataUrl, parseIconDataUrl } from "@/lib/server/branding";
 import { getPlatformConfig, PLATFORM_SETTING_KEY } from "@/lib/server/installation";
@@ -33,6 +34,12 @@ async function authorizeAdmin() {
   return { user } as const;
 }
 
+function sameOriginPublicPath(value: string) {
+  const path = normalizePublicPath(value);
+  if (path === "/api" || path.startsWith("/api/")) return path;
+  return path === "/" ? "/api" : `/api${path}`;
+}
+
 export async function GET() {
   const auth = await authorizeAdmin();
   if ("error" in auth) return auth.error;
@@ -60,6 +67,7 @@ export async function PATCH(request: Request) {
     throw error;
   }
 
+  let migratedRouteCount = 0;
   try {
     await prisma.$transaction(async (transaction) => {
       const setting = await transaction.platformSetting.findUnique({ where: { key: PLATFORM_SETTING_KEY } });
@@ -74,6 +82,9 @@ export async function PATCH(request: Request) {
       const hasCustomHero = parsed.data.heroAction === "replace"
         ? true
         : parsed.data.heroAction === "remove" ? false : previous.hasCustomHero === true;
+      const previousPublicUrl = typeof previous.publicUrl === "string" ? previous.publicUrl : "";
+      const previousHost = publicHostFromUrl(previousPublicUrl, "");
+      const nextHost = publicHostFromUrl(parsed.data.publicUrl);
 
       if (parsed.data.iconAction === "replace" && icon) {
         await transaction.platformAsset.upsert({
@@ -88,6 +99,44 @@ export async function PATCH(request: Request) {
         await transaction.platformAsset.upsert({ where: { key: "site-hero" }, create: { key: "site-hero", mimeType: hero.mimeType, data: hero.data }, update: { mimeType: hero.mimeType, data: hero.data } });
       } else if (parsed.data.heroAction === "remove") {
         await transaction.platformAsset.deleteMany({ where: { key: "site-hero" } });
+      }
+
+      if (previousHost && previousHost !== nextHost) {
+        const defaultHosts = Array.from(new Set([
+          previousHost,
+          `api.${previousHost}`,
+          `gateway.${previousHost}`,
+          "localhost",
+          "127.0.0.1",
+          "api.localhost",
+          "gateway.localhost",
+        ]));
+        const routes = await transaction.endpoint.findMany({
+          where: { publicHost: { in: defaultHosts } },
+          select: { id: true, publicPath: true, routeVersion: true, method: true },
+        });
+        const routeIds = new Set(routes.map((route) => route.id));
+        const existingTargetRoutes = await transaction.endpoint.findMany({
+          where: { publicHost: nextHost },
+          select: { id: true, publicPath: true, routeVersion: true, method: true },
+        });
+        const targetKeys = new Set<string>();
+        for (const route of existingTargetRoutes) {
+          if (!routeIds.has(route.id)) targetKeys.add(`${nextHost}\u0000${route.publicPath}\u0000${route.routeVersion}\u0000${route.method}`);
+        }
+        for (const route of routes) {
+          const publicPath = sameOriginPublicPath(route.publicPath);
+          const key = `${nextHost}\u0000${publicPath}\u0000${route.routeVersion}\u0000${route.method}`;
+          if (targetKeys.has(key)) throw new Error("PUBLIC_HOST_ROUTE_CONFLICT");
+          targetKeys.add(key);
+        }
+        for (const route of routes) {
+          await transaction.endpoint.update({
+            where: { id: route.id },
+            data: { publicHost: nextHost, publicPath: sameOriginPublicPath(route.publicPath) },
+          });
+        }
+        migratedRouteCount = routes.length;
       }
 
       await transaction.platformSetting.update({
@@ -116,6 +165,9 @@ export async function PATCH(request: Request) {
           metadata: {
             previousName: typeof previous.name === "string" ? previous.name : null,
             name: parsed.data.name,
+            previousPublicUrl,
+            publicUrl: parsed.data.publicUrl,
+            migratedRouteCount,
             iconAction: parsed.data.iconAction,
             heroAction: parsed.data.heroAction,
           },
@@ -127,9 +179,12 @@ export async function PATCH(request: Request) {
     if (error instanceof Error && error.message === "PLATFORM_NOT_INSTALLED") {
       return Response.json({ code: 409, message: "平台尚未完成初始化" }, { status: 409, headers: noStoreHeaders });
     }
+    if (error instanceof Error && error.message === "PUBLIC_HOST_ROUTE_CONFLICT") {
+      return Response.json({ code: 409, message: "新访问域名下存在重复 API 路由，请先处理冲突后再修改" }, { status: 409, headers: noStoreHeaders });
+    }
     return Response.json({ code: 500, message: "平台配置保存失败，请稍后重试" }, { status: 500, headers: noStoreHeaders });
   }
 
   revalidatePath("/", "layout");
-  return Response.json({ code: 200, message: "平台配置已保存", data: await getPlatformConfig() }, { headers: noStoreHeaders });
+  return Response.json({ code: 200, message: migratedRouteCount ? `平台配置已保存，已同步 ${migratedRouteCount} 条 API 路由` : "平台配置已保存", data: await getPlatformConfig() }, { headers: noStoreHeaders });
 }
