@@ -1,9 +1,11 @@
 import Link from "next/link";
+import Image from "next/image";
 import { ArrowRight, Building2, CircleGauge, Code2, KeyRound, Network, Route, ShieldCheck, Sparkles, UserRound } from "lucide-react";
 import { connection } from "next/server";
 import { ApiMarketplace } from "@/components/api-marketplace";
 import { PortalShell } from "@/components/portal-shell";
 import { Button } from "@/components/ui/button";
+import { platformHeroUrl } from "@/lib/platform";
 import { listCatalogProducts } from "@/lib/server/catalog";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
@@ -15,6 +17,7 @@ export default async function Home() {
   ]);
   const successRate = calls ? `${((successes / calls) * 100).toFixed(2)}%` : "暂无";
   const averageLatency = latency._avg.latencyMs == null ? "暂无" : `${Math.round(latency._avg.latencyMs)} ms`;
+  const publicSecurityCode = platform.publicSecurityNumber.match(/\d{8,}/)?.[0] ?? "";
   const metrics = [
     { value: users.toLocaleString("zh-CN"), label: "注册用户", note: "个人与企业账号", icon: UserRound },
     { value: calls.toLocaleString("zh-CN"), label: "累计调用", note: "真实网关请求", icon: Network },
@@ -24,6 +27,7 @@ export default async function Home() {
 
   return <PortalShell>
     <section className="home-hero-scene">
+      <Image src={platformHeroUrl(platform)} alt="" fill priority unoptimized className="home-hero-image" sizes="100vw" />
       <div className="container-shell home-hero-inner">
         <div className="home-hero-copy">
           <div className="home-kicker"><Sparkles />API OPEN DISTRIBUTION</div>
@@ -31,6 +35,7 @@ export default async function Home() {
           <p>{platform.description}</p>
           <div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg"><Link href="/register">开始接入<ArrowRight /></Link></Button><Button asChild variant="secondary" size="lg" className="home-secondary-action"><Link href="/marketplace"><Code2 />浏览 API</Link></Button></div>
           <div className="home-route-line"><span><Route />统一网关</span><span><KeyRound />密钥鉴权</span><span><CircleGauge />计量计费</span></div>
+          <div className="home-live-strip"><span><i />GATEWAY READY</span><code>/api/your-route</code><small>{publishedApis.toLocaleString("zh-CN")} 个能力在线</small></div>
         </div>
       </div>
     </section>
@@ -43,7 +48,7 @@ export default async function Home() {
     </div></section>
 
     <ApiMarketplace products={products} />
-    <footer className="border-t border-[var(--line)] bg-[var(--surface)] py-8"><div className="container-shell flex flex-col gap-3 text-[11px] text-[var(--muted)] sm:flex-row sm:justify-between"><span>© 2026 {platform.name} · API 开放分发平台</span><div className="flex gap-5"><Link href="/pricing">接口价格</Link><Link href="/docs">接入文档</Link><Link href="/admin">平台管理</Link></div></div></footer>
+    <footer className="border-t border-[var(--line)] bg-[var(--surface)] py-8"><div className="container-shell flex flex-col gap-4 text-[10px] text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between"><div className="space-y-1.5"><span className="block">© 2026 {platform.name} · API 开放分发平台</span>{(platform.icpNumber || platform.publicSecurityNumber) && <div className="flex flex-wrap gap-x-4 gap-y-1">{platform.icpNumber && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" className="hover:text-[var(--ink)]">{platform.icpNumber}</a>}{platform.publicSecurityNumber && <a href={publicSecurityCode ? `https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=${publicSecurityCode}` : "https://www.beian.gov.cn/"} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 hover:text-[var(--ink)]"><ShieldCheck className="size-3" />{platform.publicSecurityNumber}</a>}</div>}</div><div className="flex gap-5"><Link href="/pricing">接口价格</Link><Link href="/docs">接入文档</Link><Link href="/admin">平台管理</Link></div></div></footer>
   </PortalShell>;
 }
 

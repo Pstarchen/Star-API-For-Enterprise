@@ -9,6 +9,7 @@ const installToken = requiredEnv("E2E_INSTALL_TOKEN");
 const runId = Date.now().toString(36);
 const password = `Smoke-${runId}-Pass9`;
 const results = [];
+let defaultCategoryId = "";
 const localUpstreamPort = Number(process.env.E2E_LOCAL_UPSTREAM_PORT ?? 19090);
 const localServer = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
@@ -64,7 +65,7 @@ function expectStatus(actual, expected, label, body) {
 async function createApi(cookie, config, assets = []) {
   const form = new FormData();
   form.set("config", JSON.stringify({
-    category: "其他",
+    categoryId: config.categoryId ?? defaultCategoryId,
     color: "#586be8",
     tags: ["e2e"],
     publicHost: new URL(apiUrl).hostname,
@@ -126,6 +127,28 @@ async function main() {
   result = await jsonRequest("/api/v1/auth/me", {}, adminCookie);
   expectStatus(result.response.status, 200, "administrator session", result.body);
   assert.equal(result.body.data.platformRole, "ADMIN");
+
+  result = await jsonRequest("/api/v1/admin/api-categories", {}, adminCookie);
+  expectStatus(result.response.status, 200, "list API categories", result.body);
+  defaultCategoryId = result.body.data.find((category) => category.name === "其他")?.id ?? "";
+  assert.ok(defaultCategoryId, "default API category must exist after migration");
+
+  result = await jsonRequest("/api/v1/admin/api-categories", { method: "POST", body: { name: `Smoke Category ${runId}`, description: "Temporary category for CRUD verification", sortOrder: 88, enabled: true } }, adminCookie);
+  expectStatus(result.response.status, 201, "create API category", result.body);
+  const temporaryCategory = result.body.data;
+  result = await jsonRequest("/api/v1/admin/api-categories", { method: "PATCH", body: { id: temporaryCategory.id, name: `Smoke Renamed ${runId}`, description: "Updated category", sortOrder: 89, enabled: false } }, adminCookie);
+  expectStatus(result.response.status, 200, "update API category", result.body);
+  assert.equal(result.body.data.find((category) => category.id === temporaryCategory.id)?.enabled, false);
+  response = await request(`/api/v1/admin/api-categories?id=${encodeURIComponent(temporaryCategory.id)}`, { method: "DELETE" }, adminCookie);
+  expectStatus(response.status, 200, "delete unused API category", await response.json());
+
+  const tinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z8m8AAAAASUVORK5CYII=";
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "replace", heroDataUrl: tinyPng } }, adminCookie);
+  expectStatus(result.response.status, 200, "update hero and filing settings", result.body);
+  assert.equal(result.body.data.hasCustomHero, true);
+  response = await request("/api/v1/branding/hero");
+  expectStatus(response.status, 200, "custom hero asset", await response.arrayBuffer());
+  assert.equal(response.headers.get("content-type"), "image/png");
 
   for (const page of ["/admin", "/admin/apis", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
     response = await request(page, {}, adminCookie);
@@ -211,7 +234,7 @@ async function main() {
   const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: "/LICENSE", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/LICENSE" });
 
   const quickForm = new FormData();
-  quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
+  quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", categoryId: defaultCategoryId, name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
   response = await request("/api/v1/admin/apis", { method: "POST", body: quickForm }, adminCookie);
   let quickBody = await response.json().catch(() => null);
   expectStatus(response.status, 201, "minimal quick API creation", quickBody);
@@ -230,12 +253,12 @@ async function main() {
   assert.equal(result.body.data.routeAvailable, false);
 
   const duplicateRouteForm = new FormData();
-  duplicateRouteForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", name: "Duplicate Route", slug: `duplicate-${runId}`, publicHost: staticApi.publicHost, publicPath: staticApi.endpoint, content: JSON.stringify({ duplicate: true }) }));
+  duplicateRouteForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", categoryId: defaultCategoryId, name: "Duplicate Route", slug: `duplicate-${runId}`, publicHost: staticApi.publicHost, publicPath: staticApi.endpoint, content: JSON.stringify({ duplicate: true }) }));
   response = await request("/api/v1/admin/apis", { method: "POST", body: duplicateRouteForm }, adminCookie);
   expectStatus(response.status, 409, "duplicate route rejected on creation", await response.text());
 
   const privateForm = new FormData();
-  privateForm.set("config", JSON.stringify({ sourceType: "EXTERNAL", name: "Blocked Private Upstream", slug: `blocked-upstream-${runId}`, publicHost: new URL(apiUrl).hostname, publicPath: `/blocked-upstream-${runId}`, upstreamBaseUrl: "http://127.0.0.1:8080" }));
+  privateForm.set("config", JSON.stringify({ sourceType: "EXTERNAL", categoryId: defaultCategoryId, name: "Blocked Private Upstream", slug: `blocked-upstream-${runId}`, publicHost: new URL(apiUrl).hostname, publicPath: `/blocked-upstream-${runId}`, upstreamBaseUrl: "http://127.0.0.1:8080" }));
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 

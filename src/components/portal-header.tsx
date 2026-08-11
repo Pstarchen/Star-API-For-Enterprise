@@ -42,7 +42,7 @@ export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: Port
     <header className="sticky top-0 z-40">
       <StatusRail status={gatewayStatus} />
       <div className="portal-glass">
-        <div className="container-shell flex h-16 items-center gap-6">
+        <div className="container-shell portal-island flex h-14 items-center gap-6">
           <BrandMark />
           <nav className="hidden h-full items-center gap-0.5 md:flex" aria-label="主导航">{links.map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
@@ -60,7 +60,7 @@ export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: Port
           <Button type="button" variant="ghost" size="icon" className="ml-auto md:hidden" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "关闭导航菜单" : "打开导航菜单"}>{open ? <X /> : <Menu />}</Button>
         </div>
 
-        {open && <nav className="container-shell grid gap-1 border-t border-[var(--line)] py-3 md:hidden" aria-label="移动端主导航">{links.map((item) => {
+        {open && <nav className="container-shell portal-mobile-island grid gap-1 py-3 md:hidden" aria-label="移动端主导航">{links.map((item) => {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           return <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className={cn("flex h-11 items-center gap-3 rounded-[7px] px-3 text-[11px] font-medium transition hover:bg-[var(--surface-subtle)]", active && "bg-[var(--brand-soft)] text-[var(--brand-strong)]")}><item.icon className="size-4" />{item.label}</Link>;
         })}{currentUser ? <div className="mt-2 border-t border-[var(--line)] pt-3"><div className="flex items-center gap-2 px-2 pb-2"><Avatar><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong className="block truncate text-[10px]">{currentUser.name}</strong><small className="block truncate text-[8px] text-[var(--muted)]">{currentUser.email}</small></span><ThemeToggle className="ml-auto grid size-9 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /></div><div className="grid grid-cols-2 gap-1"><MobileAccountLink href="/console" icon={LayoutDashboard} label="控制台" close={() => setOpen(false)} />{currentUser.platformRole === "ADMIN" && <MobileAccountLink href="/admin" icon={ShieldCheck} label="运营后台" close={() => setOpen(false)} />}<MobileAccountLink href="/console/settings" icon={Settings} label="账号设置" close={() => setOpen(false)} /><button type="button" onClick={logout} disabled={loggingOut} className="flex h-10 items-center gap-2 rounded-[7px] px-2 text-left text-[10px] text-[var(--danger)] transition hover:bg-[var(--danger-soft)] disabled:opacity-50"><LogOut className="size-3.5" />退出登录</button></div></div> : <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-3"><ThemeToggle className="grid size-10 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /><Button asChild variant="secondary" className="flex-1"><Link href="/login" onClick={() => setOpen(false)}>登录</Link></Button><Button asChild className="flex-1"><Link href="/register" onClick={() => setOpen(false)}>免费注册</Link></Button></div>}</nav>}

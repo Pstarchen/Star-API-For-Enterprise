@@ -1,10 +1,18 @@
-export const apiCategories = ["身份核验", "企业数据", "智能识别", "位置服务", "消息通信", "生活服务", "开发工具", "其他"] as const;
+export type ApiCategoryOption = {
+  id: string;
+  name: string;
+  description: string;
+  sortOrder: number;
+  enabled: boolean;
+  productCount: number;
+};
 
 export type CatalogProduct = {
   id: string;
   slug: string;
   name: string;
   shortName: string;
+  categoryId: string;
   category: string;
   description: string;
   method: string;

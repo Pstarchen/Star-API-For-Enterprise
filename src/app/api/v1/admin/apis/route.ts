@@ -2,8 +2,8 @@ import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { apiSlugFromName, normalizePublicHost, normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
-import { apiCategories } from "@/lib/catalog";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId, type ContentHandlerId } from "@/lib/internal-handlers";
+import { requireEnabledApiCategory } from "@/lib/server/api-categories";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
 import { assetErrorMessage, prepareApiAssets, preparePhpPackage, type PreparedAsset } from "@/lib/server/api-assets";
 import { getCatalogProduct } from "@/lib/server/catalog";
@@ -25,7 +25,7 @@ const createSchema = z.object({
   slug: z.string().trim().min(2).max(80).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "标识仅支持小写字母、数字和连字符"),
   shortName: optionalText(4),
   description: optionalText(1000),
-  category: z.enum(apiCategories).default("其他"),
+  categoryId: z.string().min(1, "请选择 API 分类"),
   color: z.string().regex(/^#[0-9a-f]{6}$/i).default("#586be8"),
   tags: z.array(z.string().trim().min(1).max(24)).max(10).default([]),
   featured: z.boolean().default(false),
@@ -185,6 +185,8 @@ export async function POST(request: Request) {
   catch (error) { return Response.json({ code: 400, message: assetErrorMessage(error) ?? "上传内容无法处理" }, { status: 400, headers: noStoreHeaders }); }
 
   const platform = await getPlatformConfig();
+  const category = await requireEnabledApiCategory(input.categoryId);
+  if (!category) return Response.json({ code: 400, message: "所选 API 分类不存在或已停用" }, { status: 400, headers: noStoreHeaders });
   const providerName = input.providerName || platform.name;
   const providerLegalName = input.providerLegalName || providerName;
   const providerEmail = input.providerEmail || auth.user.email;
@@ -211,7 +213,7 @@ export async function POST(request: Request) {
           name: input.name,
           shortName,
           description: input.description || `${input.name} API`,
-          category: input.category,
+          categoryId: category.id,
           color: input.color,
           tags: input.tags,
           featured: input.featured,

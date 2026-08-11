@@ -8,7 +8,7 @@ import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream } from "@/lib/server/upstream";
 
-const configSchema = z.object({ name: z.string().trim().min(2).max(80), slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), publicHost: z.string().trim().toLowerCase().min(1).max(253), publicPrefix: z.string().trim().regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/), upstreamOverride: z.union([z.url(), z.literal("")]).default(""), visibility: z.enum(["PUBLIC", "PRIVATE", "GRAY", "INTERNAL"]).default("PUBLIC"), billingMode: z.enum(["FREE", "PER_REQUEST"]).default("FREE"), unitPrice: z.coerce.number().min(0).max(100000).default(0), defaultQpsLimit: z.coerce.number().int().min(1).max(100000).default(10) }).strict();
+const configSchema = z.object({ name: z.string().trim().min(2).max(80), slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), categoryId: z.string().min(1), publicHost: z.string().trim().toLowerCase().min(1).max(253), publicPrefix: z.string().trim().regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/), upstreamOverride: z.union([z.url(), z.literal("")]).default(""), visibility: z.enum(["PUBLIC", "PRIVATE", "GRAY", "INTERNAL"]).default("PUBLIC"), billingMode: z.enum(["FREE", "PER_REQUEST"]).default("FREE"), unitPrice: z.coerce.number().min(0).max(100000).default(0), defaultQpsLimit: z.coerce.number().int().min(1).max(100000).default(10) }).strict();
 const supportedMethods = ["get", "post", "put", "patch", "delete"] as const;
 type JsonObject = Record<string, unknown>;
 
@@ -36,6 +36,8 @@ export async function POST(request: Request) {
   if (!(file instanceof File) || !file.size || file.size > 2 * 1024 * 1024) return Response.json({ code: 400, message: "请选择不超过 2 MB 的 OpenAPI JSON/YAML 文件" }, { status: 400, headers: noStoreHeaders });
   const config = configSchema.safeParse(typeof rawConfig === "string" ? JSON.parse(rawConfig) : null);
   if (!config.success) return Response.json({ code: 400, message: "导入配置不正确", details: z.flattenError(config.error) }, { status: 400, headers: noStoreHeaders });
+  const category = await prisma.apiCategory.findFirst({ where: { id: config.data.categoryId, enabled: true } });
+  if (!category) return Response.json({ code: 400, message: "所选 API 分类不存在或已停用" }, { status: 400, headers: noStoreHeaders });
   let document: JsonObject;
   try { document = object(parseYaml(await file.text())); } catch { return Response.json({ code: 400, message: "OpenAPI 文件不是有效的 JSON 或 YAML" }, { status: 400, headers: noStoreHeaders }); }
   if (!text(document.openapi).startsWith("3.")) return Response.json({ code: 400, message: "当前仅支持 OpenAPI 3.x 文档" }, { status: 400, headers: noStoreHeaders });
@@ -58,7 +60,7 @@ export async function POST(request: Request) {
     await prisma.$transaction(async (transaction) => {
       let provider = auth.isAdmin ? await transaction.provider.findFirst({ where: { name: text(info["x-provider"], config.data.name) } }) : await transaction.provider.findFirst({ where: { ownerTenantId: auth.workspace.tenantId } });
       if (!provider) provider = await transaction.provider.create({ data: { ownerTenantId: auth.isAdmin ? null : auth.workspace.tenantId, name: auth.isAdmin ? text(info["x-provider"], config.data.name) : auth.workspace.tenant.name, legalName: auth.isAdmin ? text(info["x-provider"], config.data.name) : auth.workspace.tenant.name, contactEmail: auth.user.email } });
-      const product = await transaction.apiProduct.create({ data: { providerId: provider.id, slug: config.data.slug, name: config.data.name, shortName: Array.from(config.data.name).slice(0, 4).join(""), description: text(info.description, `${config.data.name} OpenAPI 服务`), category: "开发工具", color: "#586be8", tags: ["OpenAPI"], featured: false, status: "DRAFT", visibility: config.data.visibility, sla: 99.9, executionConfig: { sourceType: "OPENAPI_IMPORT" }, billingMode: config.data.billingMode, unitPrice: config.data.billingMode === "FREE" ? 0 : config.data.unitPrice, defaultQpsLimit: config.data.defaultQpsLimit } });
+      const product = await transaction.apiProduct.create({ data: { providerId: provider.id, categoryId: category.id, slug: config.data.slug, name: config.data.name, shortName: Array.from(config.data.name).slice(0, 4).join(""), description: text(info.description, `${config.data.name} OpenAPI 服务`), color: "#586be8", tags: ["OpenAPI"], featured: false, status: "DRAFT", visibility: config.data.visibility, sla: 99.9, executionConfig: { sourceType: "OPENAPI_IMPORT" }, billingMode: config.data.billingMode, unitPrice: config.data.billingMode === "FREE" ? 0 : config.data.unitPrice, defaultQpsLimit: config.data.defaultQpsLimit } });
       const apiUpstream = await transaction.apiUpstream.create({ data: { productId: product.id, type: "PUBLIC_API", rewriteMode: upstream.pathname && upstream.pathname !== "/" ? "PREFIX" : "PASSTHROUGH", upstreamPrefix: upstream.pathname === "/" ? "" : upstream.pathname.replace(/\/$/, ""), healthPath: "/", timeoutMs: 10000, authType: "NONE", nodes: { create: { name: "OpenAPI 主节点", baseUrl: upstream.origin, weight: 100 } } } });
       const apiVersion = await transaction.apiVersion.create({ data: { productId: product.id, version, basePath: `https://${config.data.publicHost}` } });
       for (const item of operations) {

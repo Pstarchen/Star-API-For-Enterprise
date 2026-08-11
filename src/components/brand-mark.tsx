@@ -10,8 +10,8 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
   const branding = useBranding();
   return (
     <Link href="/" className="inline-flex min-w-0 items-center gap-2.5" aria-label={`${branding.name} 首页`}>
-      <span className="grid size-8 shrink-0 place-items-center overflow-hidden rounded-[7px] bg-[var(--brand)] text-white shadow-[var(--shadow-brand)]">
-        {branding.hasCustomIcon ? <Image src={platformIconUrl(branding)} alt="" width={32} height={32} unoptimized className="size-full object-cover" /> : <Waypoints className="size-5" strokeWidth={2.1} />}
+      <span className={`grid size-8 shrink-0 place-items-center overflow-hidden rounded-[8px] ${branding.hasCustomIcon ? "border border-[var(--line)] bg-[var(--surface-raised)] p-0.5 shadow-[var(--shadow-xs)]" : "bg-[var(--brand)] text-white shadow-[var(--shadow-brand)]"}`}>
+        {branding.hasCustomIcon ? <Image src={platformIconUrl(branding)} alt="" width={32} height={32} unoptimized className="size-full rounded-[6px] object-contain" /> : <Waypoints className="size-5" strokeWidth={2.1} />}
       </span>
       {!compact && (
         <span className="flex min-w-0 items-baseline gap-1.5">

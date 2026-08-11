@@ -7,6 +7,7 @@ import { prisma } from "@/lib/server/prisma";
 
 const productInclude = {
   provider: true,
+  category: true,
   upstream: true,
   _count: { select: { assets: true } },
   versions: {
@@ -26,7 +27,8 @@ function mapProduct(product: ProductRecord, stats?: ProductCallStatistics): Cata
     slug: product.slug,
     name: product.name,
     shortName: product.shortName,
-    category: product.category,
+    categoryId: product.categoryId,
+    category: product.category.name,
     description: product.description,
     method: endpoint?.method ?? "GET",
     endpoint: endpoint?.publicPath ?? "/",

@@ -7,7 +7,8 @@
 - API 市场：首页展示精选接口，独立市场提供全量目录、搜索、分类、请求方法、计费方式、排序和列表/网格视图
 - API 详情：认证说明、参数文档、在线沙箱调试
 - 账户体系：首次安装向导、个人/企业注册、scrypt 密码哈希、持久会话、登录限流与工作空间切换
-- 平台品牌：安装时配置网站名称、介绍、公开地址和图标，管理员可在后台随时更新并同步到门户、控制台与浏览器元数据
+- 平台品牌：安装时配置网站名称、介绍、公开地址和图标，管理员可在后台维护网站图标、首屏图片及备案信息并同步到门户、控制台与浏览器元数据
+- API 分类：管理员可新增、排序、启停和删除未使用分类，API 新建、编辑、OpenAPI 导入及市场筛选共用同一套真实分类数据
 - 用户控制台：调用概览、应用/密钥、请求日志、Webhook 与账单；企业空间额外承载成员权限和组织设置
 - 运营后台：个人/企业用户管理、API 生命周期、服务商准入、企业组织、风控、审计、网关监控与平台设置
 - 服务端接口：目录查询、沙箱调用、密钥生成、健康检查，统一使用 Zod 校验
@@ -20,7 +21,7 @@ npm install
 npm run dev
 ```
 
-打开 `http://localhost:3000`。认证、租户、成员关系、会话与 API Key 使用 PostgreSQL 持久化；市场目录和部分运营图表仍由 `src/lib/data.ts` 提供可替换的展示数据。
+打开 `http://localhost:3000`。认证、租户、成员关系、会话、API Key、API 分类、市场目录和运营统计均使用 PostgreSQL 持久化。
 
 ## Docker 一键部署
 
@@ -57,7 +58,6 @@ npm run build
 ```text
 src/app/                 页面、布局和版本化 HTTP 路由
 src/components/          设计系统与业务组件
-src/lib/data.ts          可替换的演示数据适配器
 src/lib/server/          仅服务端可用的密钥与数据库模块
 prisma/schema.prisma     多租户领域模型
 docker-compose.yml       PostgreSQL 与 Redis 本地基础设施
@@ -72,7 +72,9 @@ docker-compose.yml       PostgreSQL 与 Redis 本地基础设施
 | `GET` | `/api/health` | 服务健康检查 |
 | `GET` | `/api/v1/catalog?q=&category=&method=` | API 目录查询 |
 | `GET/PATCH` | `/api/v1/admin/settings` | 管理员读取或更新平台品牌配置 |
+| `GET/POST/PATCH/DELETE` | `/api/v1/admin/api-categories` | 管理员维护 API 分类；使用中的分类禁止删除 |
 | `GET` | `/api/v1/branding/icon` | 返回数据库中保存的网站图标 |
+| `GET` | `/api/v1/branding/hero` | 返回数据库中保存的首页首屏图片 |
 | `POST` | `/api/v1/playground` | 沙箱请求校验与响应 |
 | `POST` | `/api/v1/keys` | 一次性签发密钥明文 |
 | `GET/POST` | `/api/v1/install` | 查询初始化状态并完成首次安装 |
@@ -97,4 +99,4 @@ docker-compose.yml       PostgreSQL 与 Redis 本地基础设施
 - 主色只表达可用/成功，琥珀表达风险，危险操作使用红色，避免状态语义混乱。
 - 门户优先发现和试用，控制台优先扫描和批量工作，运营后台优先治理和审计。
 - 所有表格支持横向滚动，固定格式控件使用稳定尺寸，键盘焦点始终可见。
-- 组件圆角不超过 6px，减少装饰卡片，保持企业工具的信息密度。
+- 工具组件以 8px 内的小圆角为主，减少装饰卡片，保持企业工具的信息密度。

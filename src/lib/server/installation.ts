@@ -22,7 +22,10 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
     name: typeof value.name === "string" && value.name.trim() ? value.name : defaultPlatformConfig.name,
     description: typeof value.description === "string" && value.description.trim() ? value.description : defaultPlatformConfig.description,
     publicUrl: typeof value.publicUrl === "string" ? value.publicUrl : "",
+    icpNumber: typeof value.icpNumber === "string" ? value.icpNumber : "",
+    publicSecurityNumber: typeof value.publicSecurityNumber === "string" ? value.publicSecurityNumber : "",
     hasCustomIcon: value.hasCustomIcon === true,
+    hasCustomHero: value.hasCustomHero === true,
     revision: setting.updatedAt.getTime().toString(36),
   };
 }

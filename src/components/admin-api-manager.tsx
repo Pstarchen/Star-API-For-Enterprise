@@ -1,16 +1,18 @@
 "use client";
 
-import { Boxes, Braces, CheckCircle2, ChevronDown, CircleAlert, Download, FileCode2, FileImage, Globe2, ImagePlus, Library, Link2, Loader2, Plus, Search, Settings2, ShieldCheck, Trash2, Type, Upload, WandSparkles, X } from "lucide-react";
+import { Boxes, Braces, CheckCircle2, ChevronDown, CircleAlert, Download, FileCode2, FileImage, Globe2, Library, Link2, Loader2, Plus, Search, Settings2, ShieldCheck, Tags, Trash2, Type, Upload, WandSparkles, X } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { apiSlugFromName, buildPublicApiUrl, normalizePublicPath } from "@/lib/api-routes";
-import { apiCategories, type CatalogProduct } from "@/lib/catalog";
+import type { ApiCategoryOption, CatalogProduct } from "@/lib/catalog";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId } from "@/lib/internal-handlers";
 import { ApiConfigManager } from "@/components/api-config-manager";
+import { ApiCategoryManager } from "@/components/api-category-manager";
 import { OpenApiImportDialog } from "@/components/openapi-import-dialog";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "./ui/dialog";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { EmptyState } from "./ui/empty-state";
+import { FileUploadField } from "./ui/file-upload";
 import { Input } from "./ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -32,9 +34,11 @@ const sourceOptions = [
   { id: "BUILTIN", name: "内置工具", description: "时间、UUID、摘要和文本转换等工具", icon: WandSparkles, tone: "bg-[var(--surface-subtle)] text-[var(--ink)]" },
 ] as const;
 
-export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicUrl, canPublish = true }: { initialApis: CatalogProduct[]; defaultPublicHost: string; defaultPublicUrl: string; canPublish?: boolean }) {
+export function AdminApiManager({ initialApis, initialCategories, defaultPublicHost, defaultPublicUrl, canPublish = true }: { initialApis: CatalogProduct[]; initialCategories: ApiCategoryOption[]; defaultPublicHost: string; defaultPublicUrl: string; canPublish?: boolean }) {
   const [apis, setApis] = useState(initialApis);
+  const [categories, setCategories] = useState(initialCategories);
   const [query, setQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [sourceType, setSourceType] = useState<SourceType>("RANDOM_IMAGE");
   const [authType, setAuthType] = useState("NONE");
@@ -48,11 +52,12 @@ export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicU
   const [contentApi, setContentApi] = useState<CatalogProduct | null>(null);
   const [configApi, setConfigApi] = useState<CatalogProduct | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [categoryOpen, setCategoryOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase();
-    return apis.filter((api) => !keyword || [api.name, api.slug, api.provider, api.category].join(" ").toLowerCase().includes(keyword));
-  }, [apis, query]);
+    return apis.filter((api) => (categoryFilter === "all" || api.categoryId === categoryFilter) && (!keyword || [api.name, api.slug, api.provider, api.category].join(" ").toLowerCase().includes(keyword)));
+  }, [apis, categoryFilter, query]);
 
   function selectSource(next: SourceType) {
     setSourceType(next);
@@ -71,7 +76,7 @@ export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicU
       name: value("name"),
       slug: value("slug"),
       description: value("description"),
-      category: value("category") || "其他",
+      categoryId: value("categoryId"),
       tags: value("tags").split(",").map((item) => item.trim()).filter(Boolean),
       featured: form.get("featured") === "on",
       providerName: value("providerName"),
@@ -152,12 +157,12 @@ export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicU
   }
 
   return <div className="page-shell space-y-5">
-    <div className="page-heading"><div><p className="eyebrow">API GOVERNANCE</p><h2 className="page-title mt-1">API 生命周期管理</h2><p className="page-description mt-1">上传内容、接入外部接口或选择内置工具，再统一配置免费或收费规则。</p></div><div className="flex gap-2"><Button onClick={() => { setImportOpen(true); setError(""); }} variant="secondary" size="sm"><Upload />导入 OpenAPI</Button><Button onClick={() => { setDialogOpen(true); setError(""); }} size="sm"><Plus />新建 API</Button></div></div>
+    <div className="page-heading"><div><p className="eyebrow">API GOVERNANCE</p><h2 className="page-title mt-1">API 生命周期管理</h2><p className="page-description mt-1">上传内容、接入外部接口或选择内置工具，再统一配置免费或收费规则。</p></div><div className="flex flex-wrap gap-2">{canPublish && <Button onClick={() => setCategoryOpen(true)} variant="secondary" size="sm"><Tags />管理分类</Button>}<Button onClick={() => { setImportOpen(true); setError(""); }} variant="secondary" size="sm"><Upload />导入 OpenAPI</Button><Button onClick={() => { setDialogOpen(true); setError(""); }} size="sm"><Plus />新建 API</Button></div></div>
     {notice && <div role="status" className="flex items-center justify-between rounded-[8px] border border-[color-mix(in_srgb,var(--success)_25%,var(--line))] bg-[color-mix(in_srgb,var(--success)_7%,var(--surface))] px-3 py-2.5 text-[10px] text-[var(--success)]"><span className="inline-flex items-center gap-2"><CheckCircle2 className="size-3.5" />{notice}</span><button onClick={() => setNotice("")} aria-label="关闭提示"><X className="size-3.5" /></button></div>}
     {error && !dialogOpen && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{error}</p>}
-    <section className="panel overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 sm:flex-row"><label className="relative flex-1 sm:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-3.5 -translate-y-1/2 text-[var(--muted)]" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 pl-9 text-[10px]" placeholder="名称、标识、服务商或分类" /></label><Button onClick={exportApis} disabled={!filtered.length} variant="secondary" size="sm"><Download />导出</Button></div>
+    <section className="panel overflow-hidden"><div className="flex flex-col gap-3 border-b border-[var(--line)] p-4 sm:flex-row"><label className="relative flex-1 sm:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 z-10 size-3.5 -translate-y-1/2 text-[var(--muted)]" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 pl-9 text-[10px]" placeholder="名称、标识、服务商或分类" /></label><Select value={categoryFilter} onValueChange={setCategoryFilter}><SelectTrigger size="sm" className="w-full sm:w-36"><SelectValue placeholder="全部分类" /></SelectTrigger><SelectContent><SelectItem value="all">全部分类</SelectItem>{categories.map((category) => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select><Button onClick={exportApis} disabled={!filtered.length} variant="secondary" size="sm"><Download />导出</Button></div>
       <TableContainer><Table className="min-w-[1080px]"><TableHeader><TableRow className="hover:bg-transparent"><TableHead className="px-4">API</TableHead><TableHead className="px-4">公开端点</TableHead><TableHead className="px-4">来源</TableHead><TableHead className="px-4">计费</TableHead><TableHead className="px-4">真实调用</TableHead><TableHead className="px-4">状态</TableHead><TableHead className="px-4 text-right">操作</TableHead></TableRow></TableHeader><TableBody>{filtered.map((api) => <TableRow key={api.id}>
-            <TableCell className="px-4"><strong className="block">{api.name}</strong><small className="text-[8px] text-[var(--muted)]">{api.provider} · {api.slug}</small></TableCell>
+            <TableCell className="px-4"><strong className="block">{api.name}</strong><small className="text-[8px] text-[var(--muted)]">{api.category} · {api.provider} · {api.slug}</small></TableCell>
             <TableCell className="px-4"><strong className="text-[var(--brand)]">{api.method}</strong><code className="mono ml-2 text-[9px]">{buildPublicApiUrl({ platformUrl: defaultPublicUrl, publicHost: api.publicHost, publicPath: api.endpoint })}</code></TableCell>
             <TableCell className="px-4"><span className="block">{executionLabel(api)}</span>{isAssetBackedHandler(api.internalHandler) && <span className="mt-1 block text-[8px] text-[var(--muted)]">{api.assetCount} 个文件/内容项</span>}</TableCell>
             <TableCell className="px-4">{api.price}</TableCell><TableCell className="px-4"><strong className="block text-[11px]">{api.calls.toLocaleString("zh-CN")} 次</strong><span className="mt-1 block text-[8px] text-[var(--muted)]">今日 {api.todayCalls.toLocaleString("zh-CN")} · {api.uptime == null ? "暂无成功率" : `${api.uptime}% 成功`} · {api.latency == null ? "暂无延迟" : `${api.latency} ms`}</span></TableCell>
@@ -167,16 +172,29 @@ export function AdminApiManager({ initialApis, defaultPublicHost, defaultPublicU
       {!filtered.length && <EmptyState icon={Boxes} title="暂无 API" description="可以从随机图片、文本、JSON 或外部接口开始创建。" />}
       <div className="border-t border-[var(--line)] px-4 py-3 text-[9px] text-[var(--muted)]">共 {filtered.length} 条真实记录</div>
     </section>
-    {dialogOpen && <CreateDialog canPublish={canPublish} defaultPublicHost={defaultPublicHost} defaultPublicUrl={defaultPublicUrl} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
+    {dialogOpen && <CreateDialog categories={categories.filter((category) => category.enabled)} canPublish={canPublish} defaultPublicHost={defaultPublicHost} defaultPublicUrl={defaultPublicUrl} sourceType={sourceType} selectSource={selectSource} authType={authType} setAuthType={setAuthType} billingMode={billingMode} setBillingMode={setBillingMode} builtinHandler={builtinHandler} setBuiltinHandler={(id) => { setBuiltinHandler(id); setMethod(internalHandlerTemplates.find((item) => item.id === id)?.methods[0] ?? "GET"); }} method={method} setMethod={setMethod} advancedOpen={advancedOpen} setAdvancedOpen={setAdvancedOpen} saving={saving} error={error} close={() => setDialogOpen(false)} submit={createApi} />}
     {contentApi && <ContentManager api={contentApi} close={() => setContentApi(null)} changed={(count) => setApis((items) => items.map((item) => item.id === contentApi.id ? { ...item, assetCount: count } : item))} />}
-    {configApi && <ApiConfigManager api={configApi} close={() => setConfigApi(null)} updated={(next) => { setApis((items) => items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items]); setConfigApi(next); }} />}
-    {importOpen && <OpenApiImportDialog defaultPublicHost={defaultPublicHost} close={() => setImportOpen(false)} imported={(next, message) => { setApis((items) => [next, ...items]); setNotice(message); setImportOpen(false); }} />}
+    {configApi && <ApiConfigManager api={configApi} categories={categories} close={() => setConfigApi(null)} updated={(next) => { setApis((items) => items.some((item) => item.id === next.id) ? items.map((item) => item.id === next.id ? next : item) : [next, ...items]); setConfigApi(next); }} />}
+    {importOpen && <OpenApiImportDialog categories={categories.filter((category) => category.enabled)} defaultPublicHost={defaultPublicHost} close={() => setImportOpen(false)} imported={(next, message) => { setApis((items) => [next, ...items]); setNotice(message); setImportOpen(false); }} />}
+    {categoryOpen && (
+      <ApiCategoryManager
+        categories={categories}
+        close={() => setCategoryOpen(false)}
+        changed={(nextCategories) => {
+          setCategories(nextCategories);
+          setApis((items) => items.map((api) => ({
+            ...api,
+            category: nextCategories.find((category) => category.id === api.categoryId)?.name ?? api.category,
+          })));
+        }}
+      />
+    )}
   </div>;
 }
 
 type RouteCheckState = { status: "idle" | "checking" | "available" | "conflict" | "error"; message: string };
 
-function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; defaultPublicUrl: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
+function CreateDialog(props: { categories: ApiCategoryOption[]; canPublish: boolean; defaultPublicHost: string; defaultPublicUrl: string; sourceType: SourceType; selectSource: (value: SourceType) => void; authType: string; setAuthType: (value: string) => void; billingMode: "FREE" | "PER_REQUEST"; setBillingMode: (value: "FREE" | "PER_REQUEST") => void; builtinHandler: string; setBuiltinHandler: (value: string) => void; method: string; setMethod: (value: string) => void; advancedOpen: boolean; setAdvancedOpen: (value: boolean) => void; saving: boolean; error: string; close: () => void; submit: (event: FormEvent<HTMLFormElement>) => void }) {
   const [mode, setMode] = useState<"quick" | "full">("quick");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -187,6 +205,7 @@ function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; d
   const [pathEdited, setPathEdited] = useState(false);
   const [routeCheck, setRouteCheck] = useState<RouteCheckState>({ status: "idle", message: "填写名称后自动检查" });
   const selectedTemplate = internalHandlerTemplates.find((item) => item.id === props.builtinHandler) ?? internalHandlerTemplates[0];
+  const defaultCategoryId = props.categories.find((item) => item.name === "其他")?.id ?? props.categories[0]?.id ?? "";
   const routeInputValid = Boolean(publicHost && /^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/.test(publicPath) && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) && version);
   const displayedRouteCheck = routeInputValid ? routeCheck : { status: "idle", message: "填写完整后自动检查" } satisfies RouteCheckState;
 
@@ -233,7 +252,7 @@ function CreateDialog(props: { canPublish: boolean; defaultPublicHost: string; d
 
   return <Dialog open onOpenChange={(open) => { if (!open) props.close(); }}><DialogContent className="w-[min(calc(100%-24px),1024px)] p-0" showClose={false}><form onSubmit={props.submit}><input type="hidden" name="creationMode" value={mode} /><div className="flex flex-col gap-4 border-b border-[var(--line)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between"><div><DialogTitle className="text-[15px]">创建一个可调用的 API</DialogTitle><DialogDescription>快速添加使用安全默认值，完整配置保留全部网关能力。</DialogDescription></div><div className="flex items-center gap-2"><Tabs value={mode} onValueChange={(value) => setMode(value as "quick" | "full")}><TabsList><TabsTrigger value="quick">快速添加</TabsTrigger><TabsTrigger value="full">完整配置</TabsTrigger></TabsList></Tabs><Button type="button" onClick={props.close} variant="ghost" size="icon-sm" aria-label="关闭"><X /></Button></div></div>
     <div className="space-y-6 p-5"><Section title="这个 API 用来做什么"><div className="grid grid-cols-2 gap-2 lg:grid-cols-4">{sourceOptions.filter((option) => props.canPublish || option.id !== "SERVER_LOCAL").map((option) => <button key={option.id} type="button" onClick={() => props.selectSource(option.id)} className={`min-h-28 rounded-[8px] border p-3 text-left transition ${props.sourceType === option.id ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[inset_0_0_0_1px_var(--brand)]" : "border-[var(--line)] hover:bg-[var(--surface-subtle)]"}`}><span className={`grid size-8 place-items-center rounded-[8px] ${option.tone}`}><option.icon className="size-4" /></span><strong className="mt-3 block text-[11px]">{option.name}</strong><span className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{option.description}</span></button>)}</div></Section>
-    <Section title="名称与公开路由"><div className={`grid gap-4 ${mode === "quick" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}><Field label="API 名称"><input name="name" required minLength={2} value={name} onChange={(event) => changeName(event.target.value)} className={inputClass} placeholder="例如：随机风景图" /></Field><Field label="唯一标识"><input name="slug" required minLength={2} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => changeSlug(event.target.value)} placeholder="自动生成" className={inputClass} /></Field>{mode === "quick" && publicPathField}</div>{mode === "full" ? <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{routeFields}</div> : <><input type="hidden" name="publicHost" value={publicHost} /><input type="hidden" name="version" value={version} /><input type="hidden" name="visibility" value="PUBLIC" /></>}<EndpointPath platformUrl={props.defaultPublicUrl} publicHost={publicHost} publicPath={publicPath} version={version} method={props.method} state={displayedRouteCheck} /></Section>
+    <Section title="名称与公开路由"><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><Field label="API 名称"><input name="name" required minLength={2} value={name} onChange={(event) => changeName(event.target.value)} className={inputClass} placeholder="例如：随机风景图" /></Field><Field label="唯一标识"><input name="slug" required minLength={2} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" value={slug} onChange={(event) => changeSlug(event.target.value)} placeholder="自动生成" className={inputClass} /></Field><Field label="能力分类"><Select name="categoryId" required defaultValue={defaultCategoryId}><SelectTrigger className="w-full"><SelectValue placeholder="选择分类" /></SelectTrigger><SelectContent>{props.categories.map((category) => <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>)}</SelectContent></Select></Field>{mode === "quick" && publicPathField}</div>{mode === "full" ? <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{routeFields}</div> : <><input type="hidden" name="publicHost" value={publicHost} /><input type="hidden" name="version" value={version} /><input type="hidden" name="visibility" value="PUBLIC" /></>}<EndpointPath platformUrl={props.defaultPublicUrl} publicHost={publicHost} publicPath={publicPath} version={version} method={props.method} state={displayedRouteCheck} /></Section>
     <Section title="返回内容"><SourceFields {...props} quick={mode === "quick"} selectedTemplate={selectedTemplate} /></Section>
     <Section title="收费方式"><div className="grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => props.setBillingMode("FREE")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "FREE" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">免费调用</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">仍会记录调用量并执行 QPS 和月配额限制。</span></button><button type="button" onClick={() => props.setBillingMode("PER_REQUEST")} className={`rounded-[8px] border p-4 text-left ${props.billingMode === "PER_REQUEST" ? "border-[var(--brand)] bg-[var(--brand-soft)]" : "border-[var(--line)]"}`}><strong className="text-[11px]">按成功请求收费</strong><span className="mt-1 block text-[9px] text-[var(--muted)]">只有 2xx/3xx 成功响应产生费用，失败请求不收费。</span></button></div>{props.billingMode === "PER_REQUEST" && <div className="mt-4 grid gap-4 sm:grid-cols-2"><Field label="单价（元/次）"><input name="unitPrice" required type="number" min="0.000001" step="0.000001" className={inputClass} placeholder="0.01" /></Field><Field label="每月免费次数" optional><input name="freeQuotaMonthly" type="number" min="0" defaultValue="0" className={inputClass} /></Field></div>}</Section>
     {mode === "full" ? <section className="rounded-[8px] border border-[var(--line)]"><button type="button" onClick={() => props.setAdvancedOpen(!props.advancedOpen)} className="flex w-full items-center justify-between px-4 py-3 text-left"><span><strong className="block text-[11px]">高级设置</strong><span className="mt-0.5 block text-[9px] text-[var(--muted)]">说明、分类、服务商、QPS、SLA 和安全策略均可按需配置</span></span><ChevronDown className={`size-4 transition ${props.advancedOpen ? "rotate-180" : ""}`} /></button>{props.advancedOpen && <AdvancedFields />}</section> : <div className="flex items-start gap-3 rounded-[8px] bg-[var(--aqua-soft)] px-4 py-3 text-[9px] leading-4 text-[var(--aqua)]"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><span>默认启用调用日志与 CORS，QPS 为 10，版本为 v1，并根据部署地址自动决定是否强制 HTTPS。创建后可随时进入路由配置调整。</span></div>}
@@ -266,7 +285,6 @@ function AdvancedFields() {
   return <div className="grid gap-4 border-t border-[var(--line)] p-4 sm:grid-cols-2 lg:grid-cols-4">
     <Field label="接口说明" optional><textarea name="description" rows={3} className={`${textareaClass} lg:min-h-24`} /></Field>
     <Field label="标签" optional><input name="tags" className={inputClass} placeholder="图片,随机,素材" /></Field>
-    <Field label="能力分类" optional><select name="category" defaultValue="其他" className={inputClass}>{apiCategories.map((item) => <option key={item}>{item}</option>)}</select></Field>
     <Field label="服务商品牌" optional><input name="providerName" className={inputClass} placeholder="留空使用平台名称" /></Field>
     <Field label="服务商法定名称" optional><input name="providerLegalName" className={inputClass} /></Field>
     <Field label="服务商联系邮箱" optional><input name="providerEmail" type="email" className={inputClass} placeholder="留空使用管理员邮箱" /></Field>
@@ -303,14 +321,7 @@ function ContentManager({ api, close, changed }: { api: CatalogProduct; close: (
 }
 
 function AssetPicker({ name, accept, multiple = false, required = false, title, description }: { name: string; accept: string; multiple?: boolean; required?: boolean; title: string; description: string }) {
-  const [files, setFiles] = useState<File[]>([]);
-  const selected = files.length > 0;
-  return <label className="group block cursor-pointer rounded-[8px] outline-none focus-within:ring-2 focus-within:ring-[var(--brand-line)] focus-within:ring-offset-2 focus-within:ring-offset-[var(--surface)]">
-    <input name={name} required={required} type="file" accept={accept} multiple={multiple} onChange={(event) => setFiles(Array.from(event.target.files ?? []))} className="sr-only" />
-    <span className={`grid min-h-36 place-items-center rounded-[8px] border border-dashed p-5 text-center transition-[border-color,background-color,box-shadow] ${selected ? "border-[var(--brand)] bg-[var(--brand-soft)] shadow-[inset_0_0_0_1px_var(--brand-line)]" : "border-[var(--line-strong)] bg-[var(--surface-subtle)] group-hover:border-[var(--brand)] group-hover:bg-[var(--brand-soft)]"}`}>
-      <span className="flex w-full max-w-lg flex-col items-center"><span className={`grid size-10 place-items-center rounded-[8px] ${selected ? "bg-[var(--surface)] text-[var(--success)] shadow-[var(--shadow-xs)]" : "bg-[var(--brand-soft)] text-[var(--brand)]"}`}>{selected ? <CheckCircle2 className="size-5" /> : <ImagePlus className="size-5" />}</span><strong className="mt-3 text-[11px]">{selected ? `${files.length} 张图片已就绪` : title}</strong><span className="mt-1 w-full truncate text-[9px] text-[var(--muted)]">{selected ? files.map((file) => file.name).join("、") : description}</span><span className="mt-3 inline-flex h-8 items-center rounded-[7px] border border-[var(--line)] bg-[var(--surface)] px-3 text-[9px] font-semibold text-[var(--ink)] shadow-[var(--shadow-xs)]">{selected ? "重新选择" : "选择文件"}</span></span>
-    </span>
-  </label>;
+  return <FileUploadField name={name} required={required} accept={accept} multiple={multiple} maxBytes={8 * 1024 * 1024} title={title} description={description} icon={<FileImage />} />;
 }
 
 function executionLabel(api: CatalogProduct) { if (api.internalHandler === "content.random-image") return "随机图片"; if (api.internalHandler === "content.random-text") return "随机文本"; if (api.internalHandler === "content.static-json") return "固定 JSON"; if (api.internalHandler === phpHandlerId) return "PHP 程序包"; if (api.upstreamType === "PUBLIC_API") return "公网 API"; if (api.upstreamType === "SERVER_LOCAL") return "服务器内网"; if (api.upstreamType === "TUNNEL") return "临时穿透"; return "内置工具"; }

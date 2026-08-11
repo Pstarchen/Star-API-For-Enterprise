@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       await transaction.platformSetting.create({
         data: {
           key: PLATFORM_SETTING_KEY,
-          value: { name: platformName, description: platformDescription, publicUrl, hasCustomIcon: Boolean(icon), installedAt: new Date().toISOString(), version: 1 },
+          value: { name: platformName, description: platformDescription, publicUrl, icpNumber: "", publicSecurityNumber: "", hasCustomIcon: Boolean(icon), hasCustomHero: false, installedAt: new Date().toISOString(), version: 1 },
         },
       });
       await transaction.platformSetting.create({
@@ -94,7 +94,7 @@ export async function POST(request: Request) {
     await createSession(user.id);
     return Response.json({ code: 201, message: "平台初始化完成", data: { next: "/admin" } }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
-    if (error instanceof Error && ["UNSUPPORTED_ICON", "INVALID_ICON_SIZE", "INVALID_ICON_CONTENT"].includes(error.message)) {
+    if (error instanceof Error && ["UNSUPPORTED_ICON", "INVALID_IMAGE_SIZE", "INVALID_ICON_CONTENT"].includes(error.message)) {
       return Response.json({ code: 400, message: "网站图标格式不正确，请使用 512 KB 内的 PNG、JPEG、WebP 或 ICO" }, { status: 400, headers: noStoreHeaders });
     }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
