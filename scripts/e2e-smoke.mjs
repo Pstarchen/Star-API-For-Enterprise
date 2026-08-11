@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { zipSync, strToU8 } from "fflate";
 
@@ -137,8 +138,8 @@ async function main() {
   response = await request(`/api/v1/admin/api-categories?id=${encodeURIComponent(temporaryCategory.id)}`, { method: "DELETE" }, adminCookie);
   expectStatus(response.status, 200, "delete unused API category", await response.json());
 
-  const tinyPng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Z8m8AAAAASUVORK5CYII=";
-  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "replace", heroDataUrl: tinyPng } }, adminCookie);
+  const heroDataUrl = `data:image/jpeg;base64,${readFileSync(new URL("../public/art/anime-operator.jpg", import.meta.url)).toString("base64")}`;
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "replace", heroDataUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "update hero and filing settings", result.body);
   assert.equal(result.body.data.hasCustomHero, true);
   response = await request("/api/v1/branding/hero");

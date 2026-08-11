@@ -15,6 +15,6 @@ export function DialogContent({ className, children, showClose = true, ...props 
 
 export function DialogHeader({ className, ...props }: React.ComponentProps<"div">) { return <div data-slot="dialog-header" className={cn("border-b border-[var(--line)] px-5 py-4 pr-12", className)} {...props} />; }
 export function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) { return <DialogPrimitive.Title data-slot="dialog-title" className={cn("text-[15px] font-bold text-[var(--ink)]", className)} {...props} />; }
-export function DialogDescription({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Description>) { return <DialogPrimitive.Description data-slot="dialog-description" className={cn("mt-1 text-[10px] leading-5 text-[var(--muted)]", className)} {...props} />; }
+export function DialogDescription({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Description>) { return <DialogPrimitive.Description data-slot="dialog-description" className={cn("mt-1 text-xs leading-5 text-[var(--muted)]", className)} {...props} />; }
 export function DialogBody({ className, ...props }: React.ComponentProps<"div">) { return <div data-slot="dialog-body" className={cn("p-5", className)} {...props} />; }
 export function DialogFooter({ className, ...props }: React.ComponentProps<"div">) { return <div data-slot="dialog-footer" className={cn("flex flex-col-reverse gap-2 border-t border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-3 sm:flex-row sm:justify-end", className)} {...props} />; }

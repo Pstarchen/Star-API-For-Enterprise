@@ -16,9 +16,9 @@ export const buttonVariants = cva(
         destructive: "border border-[var(--danger)] bg-[var(--danger)] text-white hover:brightness-95",
       },
       size: {
-        sm: "h-8 px-3 text-[10px] [&_svg]:size-3.5",
-        default: "h-10 px-4 text-[11px] [&_svg]:size-4",
-        lg: "h-11 px-5 text-[12px] [&_svg]:size-4",
+        sm: "h-9 px-3 text-xs [&_svg]:size-3.5",
+        default: "h-10 px-4 text-[13px] [&_svg]:size-4",
+        lg: "h-11 px-5 text-sm [&_svg]:size-4",
         icon: "size-9 p-0 [&_svg]:size-4",
         "icon-sm": "size-8 p-0 [&_svg]:size-3.5",
       },

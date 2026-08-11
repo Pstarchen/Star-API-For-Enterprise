@@ -55,7 +55,7 @@ export function FileUploadField({ name, title, description, accept, required = f
     </label>
     {selected && <button type="button" onClick={clear} className="file-upload-reset"><RotateCcw />清除</button>}
     <span className="sr-only" aria-live="polite">{selected ? `已选择 ${files.length} 个文件` : "尚未选择文件"}</span>
-    {error && <p role="alert" className="mt-2 text-[9px] text-[var(--danger)]">{error}</p>}
+    {error && <p role="alert" className="mt-2 text-xs text-[var(--danger)]">{error}</p>}
   </div>;
 }
 

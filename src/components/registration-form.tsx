@@ -35,7 +35,7 @@ export function RegistrationForm() {
     }
   }
 
-  if (success) return <Card className="border-[var(--success-line)] bg-[var(--success-soft)]"><CardContent><span className="grid size-10 place-items-center rounded-[8px] bg-[var(--surface-raised)] text-[var(--success)]"><CheckCircle2 className="size-5" /></span><h2 className="mt-4 text-[16px] font-bold">账号创建成功</h2><p className="mt-2 text-[11px] leading-6 text-[var(--muted)]">工作区“{success.workspace}”已准备完成。{success.nextStep === "VERIFY_ENTERPRISE" ? "完成企业认证后即可申请生产配额。" : "现在可以创建第一枚 API Key。"}</p><Button asChild className="mt-5"><Link href="/console">进入控制台</Link></Button></CardContent></Card>;
+  if (success) return <Card className="border-[var(--success-line)] bg-[var(--success-soft)]"><CardContent><span className="grid size-10 place-items-center rounded-[8px] bg-[var(--surface-raised)] text-[var(--success)]"><CheckCircle2 className="size-5" /></span><h2 className="mt-4 text-[17px] font-bold">账号创建成功</h2><p className="mt-2 text-[13px] leading-6 text-[var(--muted)]">工作区“{success.workspace}”已准备完成。{success.nextStep === "VERIFY_ENTERPRISE" ? "完成企业认证后即可申请生产配额。" : "现在可以创建第一枚 API Key。"}</p><Button asChild className="mt-5"><Link href="/console">进入控制台</Link></Button></CardContent></Card>;
 
   return <form onSubmit={handleSubmit} className="space-y-4">
     <Tabs value={accountType} onValueChange={(value) => setAccountType(value as AccountType)}><TabsList className="grid h-auto w-full grid-cols-2"><TabsTrigger value="personal" className="h-9"><UserRound className="size-4" />个人用户</TabsTrigger><TabsTrigger value="enterprise" className="h-9"><Building2 className="size-4" />企业用户</TabsTrigger></TabsList></Tabs>
@@ -43,9 +43,9 @@ export function RegistrationForm() {
     {accountType === "enterprise" && <FormField><FormLabel>企业名称</FormLabel><Input name="companyName" required autoComplete="organization" placeholder="企业工商登记全称" className="h-11 text-[12px]" /></FormField>}
     <FormField><FormLabel>邮箱</FormLabel><Input name="email" required type="email" autoComplete="email" placeholder="name@example.com" className="h-11 text-[12px]" /></FormField>
     <FormField><FormLabel>密码</FormLabel><InputGroup className="h-11"><Input name="password" required minLength={10} maxLength={72} type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="至少 10 位，包含字母和数字" className="text-[12px]" /><Button type="button" variant="ghost" size="icon" onClick={() => setShowPassword((value) => !value)} className="mr-1" aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</Button></InputGroup></FormField>
-    <label className="flex items-start gap-2 text-[10px] leading-5 text-[var(--muted)]"><Checkbox name="acceptedTerms" required className="mt-0.5" />我已阅读并同意服务协议和隐私政策</label>
+    <label className="flex items-start gap-2 text-xs leading-5 text-[var(--muted)]"><Checkbox name="acceptedTerms" required className="mt-0.5" />我已阅读并同意服务协议和隐私政策</label>
     {error && <FormMessage>{error}</FormMessage>}
     <Button type="submit" size="lg" disabled={loading} className="w-full">{loading && <Loader2 className="animate-spin" />}{loading ? "正在创建账号" : accountType === "enterprise" ? "创建企业账号" : "创建个人账号"}</Button>
-    <p className="text-center text-[10px] text-[var(--muted)]">已有账号？ <Link href="/login" className="font-semibold text-[var(--brand)]">登录</Link></p>
+    <p className="text-center text-xs text-[var(--muted)]">已有账号？ <Link href="/login" className="font-semibold text-[var(--brand)]">登录</Link></p>
   </form>;
 }

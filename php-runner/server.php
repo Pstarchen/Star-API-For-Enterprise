@@ -31,7 +31,7 @@ function remove_tree(string $directory): void {
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) === '/health') respond(200, ['status' => 'ok']);
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) !== '/execute') respond(404, ['message' => 'not found']);
 
-$expected = getenv('RUNNER_SECRET') ?: '';
+$expected = getenv('RUNNER_SECRET') ?: (getenv('PHP_RUNNER_SECRET') ?: '');
 $provided = $_SERVER['HTTP_X_RUNNER_SECRET'] ?? '';
 if (strlen($expected) < 32 || !hash_equals($expected, $provided)) respond(401, ['message' => 'unauthorized']);
 
@@ -94,7 +94,8 @@ try {
     }
 
     $disabled = implode(',', ['exec','shell_exec','system','passthru','proc_open','popen','pcntl_exec','putenv','mail','dl','link','symlink']);
-    $command = ['php-cgi83', '-d', 'open_basedir=' . $directory, '-d', 'allow_url_fopen=0', '-d', 'allow_url_include=0', '-d', 'disable_functions=' . $disabled, '-d', 'memory_limit=128M', '-d', 'max_execution_time=10', '-d', 'display_errors=0', '-d', 'log_errors=0', '-d', 'expose_php=0'];
+    $phpCgi = getenv('PHP_CGI_BINARY') ?: 'php-cgi83';
+    $command = [$phpCgi, '-d', 'open_basedir=' . $directory, '-d', 'allow_url_fopen=0', '-d', 'allow_url_include=0', '-d', 'disable_functions=' . $disabled, '-d', 'memory_limit=128M', '-d', 'max_execution_time=10', '-d', 'display_errors=0', '-d', 'log_errors=0', '-d', 'expose_php=0'];
     $pipes = [];
     $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $directory, $environment);
     if (!is_resource($process)) respond(500, ['message' => 'runtime unavailable']);

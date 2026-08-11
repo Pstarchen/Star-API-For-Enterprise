@@ -61,6 +61,9 @@ export async function PATCH(request: Request) {
     if (parsed.data.iconAction === "replace") icon = parseIconDataUrl(parsed.data.iconDataUrl);
     if (parsed.data.heroAction === "replace") hero = parseHeroDataUrl(parsed.data.heroDataUrl);
   } catch (error) {
+    if (error instanceof Error && error.message === "INVALID_HERO_DIMENSIONS") {
+      return Response.json({ code: 400, message: "首屏图片尺寸不能小于 960 × 480 像素" }, { status: 400, headers: noStoreHeaders });
+    }
     if (error instanceof Error && ["UNSUPPORTED_ICON", "INVALID_IMAGE_SIZE", "INVALID_ICON_CONTENT"].includes(error.message)) {
       return Response.json({ code: 400, message: "图片格式或大小不正确；图标最大 512 KB，首屏图片最大 5 MB" }, { status: 400, headers: noStoreHeaders });
     }

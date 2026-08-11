@@ -57,14 +57,14 @@ export function LoginForm({ passwordLoginEnabled, registrationEnabled, githubEna
   }
 
   return <div className="space-y-4">
-    {githubEnabled && <><Button asChild variant="secondary" size="lg" className="w-full"><Link href="/api/v1/auth/github"><Github />使用 GitHub 登录</Link></Button>{passwordLoginEnabled && <div className="flex items-center gap-3 text-[9px] text-[var(--muted)]"><span className="h-px flex-1 bg-[var(--line)]" />或使用邮箱密码<span className="h-px flex-1 bg-[var(--line)]" /></div>}</>}
+    {githubEnabled && <><Button asChild variant="secondary" size="lg" className="w-full"><Link href="/api/v1/auth/github"><Github />使用 GitHub 登录</Link></Button>{passwordLoginEnabled && <div className="flex items-center gap-3 text-xs text-[var(--muted)]"><span className="h-px flex-1 bg-[var(--line)]" />或使用邮箱密码<span className="h-px flex-1 bg-[var(--line)]" /></div>}</>}
     {passwordLoginEnabled && <form onSubmit={submit} className="space-y-4">
       <FormField><FormLabel>邮箱</FormLabel><Input name="email" required type="email" autoComplete="email" placeholder="name@example.com" className="h-11 text-[12px]" /></FormField>
       <FormField><FormLabel>密码</FormLabel><InputGroup className="h-11"><Input name="password" required maxLength={72} type={showPassword ? "text" : "password"} autoComplete="current-password" placeholder="输入密码" className="text-[12px]" /><Button type="button" variant="ghost" size="icon" onClick={() => setShowPassword((value) => !value)} className="mr-1 shrink-0" aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</Button></InputGroup></FormField>
-      <label className="flex items-center gap-2 text-[10px] text-[var(--muted)]"><Checkbox name="remember" />保持登录 30 天</label>
+      <label className="flex items-center gap-2 text-xs text-[var(--muted)]"><Checkbox name="remember" />保持登录 30 天</label>
       {(error || oauthError) && <FormMessage>{error || oauthMessages[oauthError ?? ""] || "第三方登录失败"}</FormMessage>}
       <Button type="submit" size="lg" disabled={loading} className="w-full">{loading && <Loader2 className="animate-spin" />}{loading ? "正在登录" : "登录"}</Button>
-      {registrationEnabled && <p className="text-center text-[10px] text-[var(--muted)]">还没有账号？ <Link href="/register" className="font-semibold text-[var(--brand)] hover:text-[var(--brand-strong)]">免费注册</Link></p>}
+      {registrationEnabled && <p className="text-center text-xs text-[var(--muted)]">还没有账号？ <Link href="/register" className="font-semibold text-[var(--brand)] hover:text-[var(--brand-strong)]">免费注册</Link></p>}
     </form>}
     {!passwordLoginEnabled && !githubEnabled && <FormMessage>平台暂时没有可用的登录方式，请联系管理员。</FormMessage>}
     {!passwordLoginEnabled && oauthError && <FormMessage>{oauthMessages[oauthError] || "第三方登录失败"}</FormMessage>}

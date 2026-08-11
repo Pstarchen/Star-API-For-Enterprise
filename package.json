@@ -11,6 +11,9 @@
     "check": "npm run lint && npm run typecheck && npm run build",
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "install:token": "node scripts/show-install-token-docker.mjs",
+    "install:token:host": "node --env-file=.env.production.local scripts/show-install-token.mjs",
+    "deploy:baota:init": "bash deploy/baota/init-environment.sh",
+    "deploy:baota:build": "bash deploy/baota/build.sh",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio"
