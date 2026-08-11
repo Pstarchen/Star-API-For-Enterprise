@@ -98,6 +98,7 @@ async function publishApi(cookie, product) {
 async function subscribe(cookie, appId, productId, slug) {
   const { response, body } = await jsonRequest("/api/v1/subscriptions", { method: "POST", body: { appId, productId } }, cookie);
   expectStatus(response.status, 201, `subscribe ${slug}`, body);
+  return body;
 }
 
 async function main() {
@@ -266,7 +267,17 @@ async function main() {
   const apiKey = result.body.data.secret;
   assert.match(apiKey, /^sk_test_/);
 
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await subscribe(personalCookie, appId, product.id, product.slug);
+  let latestSubscriptionResult;
+  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+
+  const quickSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === quickApi.id);
+  assert.ok(quickSubscription, "quick API subscription must exist before cancellation");
+  result = await jsonRequest(`/api/v1/subscriptions?id=${encodeURIComponent(quickSubscription.id)}`, { method: "DELETE" }, personalCookie);
+  expectStatus(result.response.status, 200, "cancel API subscription", result.body);
+  assert.equal(result.body.data.subscriptions.find((item) => item.id === quickSubscription.id)?.status, "CANCELED");
+  result = await jsonRequest("/api/v1/subscriptions", { method: "POST", body: { appId, productId: quickApi.id } }, personalCookie);
+  expectStatus(result.response.status, 201, "resubscribe canceled API", result.body);
+  assert.equal(result.body.data.subscriptions.find((item) => item.id === quickSubscription.id)?.status, "ACTIVE");
 
   result = await jsonRequest("/api/v1/admin/apis/statistics", {}, adminCookie);
   expectStatus(result.response.status, 200, "statistics before gateway calls", result.body);

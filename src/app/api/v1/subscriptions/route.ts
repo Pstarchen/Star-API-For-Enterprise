@@ -18,6 +18,33 @@ export async function POST(request: Request) {
   ]);
   if (!app) return Response.json({ code: 404, message: "应用不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
   if (!product) return Response.json({ code: 404, message: "API 不存在或尚未发布" }, { status: 404, headers: noStoreHeaders });
+  const existing = await prisma.subscription.findFirst({ where: { appId: app.id, productId: product.id } });
+  if (existing?.status === "ACTIVE") return Response.json({ code: 409, message: "该应用已经订阅此 API" }, { status: 409, headers: noStoreHeaders });
+
+  if (existing) {
+    const restored = await prisma.$transaction(async (transaction) => {
+      const result = await transaction.subscription.updateMany({
+        where: { id: existing.id, status: { not: "ACTIVE" } },
+        data: { status: "ACTIVE", quotaMonthly: 0, qpsLimit: product.defaultQpsLimit, unitPrice: product.unitPrice },
+      });
+      if (result.count === 0) return false;
+      await transaction.auditLog.create({
+        data: {
+          tenantId: app.tenantId,
+          actorId: user.id,
+          action: "subscription.reactivate",
+          resource: "subscription",
+          resourceId: existing.id,
+          metadata: { appId: app.id, productId: product.id, previousStatus: existing.status },
+          ipAddress: requestIp(request),
+        },
+      });
+      return true;
+    });
+    if (!restored) return Response.json({ code: 409, message: "该应用已经订阅此 API" }, { status: 409, headers: noStoreHeaders });
+    return Response.json({ code: 201, message: "API 已重新订阅", data: await getApplication(app.id) }, { status: 201, headers: noStoreHeaders });
+  }
+
   try {
     await prisma.$transaction(async (transaction) => {
       await transaction.subscription.create({ data: { appId: app.id, productId: product.id, quotaMonthly: 0, qpsLimit: product.defaultQpsLimit, unitPrice: product.unitPrice } });
