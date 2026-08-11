@@ -207,6 +207,7 @@ async function main() {
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
   const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}`, healthPath: "/health" });
   const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, publicPath: "/README.md", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/README.md" });
+  const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Redirect Upstream Smoke", slug: `redirect-${runId}`, publicPath: "/github/gitignore/raw/main/README.md", upstreamBaseUrl: "https://github.com", healthPath: "/github/gitignore/raw/main/README.md" });
   const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, publicPath: "/LICENSE", upstreamBaseUrl: "https://raw.githubusercontent.com/github/gitignore/main", healthPath: "/LICENSE" });
 
   const quickForm = new FormData();
@@ -238,7 +239,7 @@ async function main() {
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
+  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "Admin API Test App", environment: "TEST" } }, adminCookie);
   expectStatus(result.response.status, 201, "administrator creates test application and API key", result.body);
@@ -268,7 +269,7 @@ async function main() {
   assert.match(apiKey, /^sk_test_/);
 
   let latestSubscriptionResult;
-  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+  for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
 
   const quickSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === quickApi.id);
   assert.ok(quickSubscription, "quick API subscription must exist before cancellation");
@@ -302,6 +303,8 @@ async function main() {
   expectStatus(response.status, 200, "server-local gateway call", await response.text());
   response = await request("/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "external upstream gateway call", await response.text());
+  response = await request("/github/gitignore/raw/main/README.md", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
+  expectStatus(response.status, 200, "redirected external upstream gateway call", await response.text());
   response = await request("/LICENSE", { headers: { Authorization: `Bearer ${apiKey}` } }, "", apiUrl);
   expectStatus(response.status, 200, "tunnel upstream gateway call", await response.text());
   response = await request(quickApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
@@ -311,9 +314,9 @@ async function main() {
 
   result = await jsonRequest("/api/v1/admin/apis/statistics", {}, adminCookie);
   expectStatus(result.response.status, 200, "statistics after gateway calls", result.body);
-  assert.ok(result.body.data.totalCalls >= callsBefore + 9, "successful gateway calls must increase total statistics");
-  assert.ok(result.body.data.todayCalls >= callsBefore + 9, "successful gateway calls must increase today's statistics");
-  assert.ok(result.body.data.daily.reduce((sum, point) => sum + point.success + point.failed, 0) >= 9, "seven-day series must contain gateway calls");
+  assert.ok(result.body.data.totalCalls >= callsBefore + 10, "successful gateway calls must increase total statistics");
+  assert.ok(result.body.data.todayCalls >= callsBefore + 10, "successful gateway calls must increase today's statistics");
+  assert.ok(result.body.data.daily.reduce((sum, point) => sum + point.success + point.failed, 0) >= 10, "seven-day series must contain gateway calls");
 
   const removableApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Removable API Smoke", slug: `removable-${runId}`, content: JSON.stringify({ removable: true }) });
   await publishApi(adminCookie, removableApi);

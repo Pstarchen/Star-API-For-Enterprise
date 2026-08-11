@@ -49,7 +49,7 @@ const createSchema = z.object({
   allowPrivateNetwork: z.boolean().default(false),
   rewriteMode: z.enum(["PASSTHROUGH", "PREFIX"]).default("PASSTHROUGH"),
   upstreamPrefix: optionalText(180),
-  healthPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/).default("/health"),
+  healthPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/).default("/"),
   timeoutMs: z.coerce.number().int().min(500).max(60000).default(10000),
   corsEnabled: z.boolean().default(false),
   forceHttps: z.boolean().default(true),

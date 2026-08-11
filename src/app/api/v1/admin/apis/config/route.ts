@@ -109,8 +109,10 @@ export async function POST(request: Request) {
       catch (error) { const message = error instanceof Error ? error.message : "HEALTH_CHECK_FAILED"; results.push({ id: node.id, name: node.name, healthy: false, error: message }); await prisma.apiUpstreamNode.update({ where: { id: node.id }, data: { healthStatus: "UNHEALTHY", failureCount: { increment: 1 }, lastCheckedAt: new Date(), lastError: message } }); }
     }
     const healthyCount = results.filter((item) => item.healthy).length;
-    await prisma.apiUpstream.update({ where: { id: product.upstream.id }, data: { healthStatus: healthyCount ? "HEALTHY" : "UNHEALTHY", lastHealthCheckAt: new Date(), lastHealthError: healthyCount ? null : "所有上游节点均不可用" } });
-    return Response.json({ code: healthyCount ? 200 : 503, message: healthyCount ? `${healthyCount} 个节点健康` : "所有上游节点均不可用", data: { healthy: Boolean(healthyCount), results } }, { status: healthyCount ? 200 : 503, headers: noStoreHeaders });
+    const firstError = results.find((item) => !item.healthy)?.error;
+    const failureMessage = firstError ? `所有上游节点均不可用：${firstError}` : "所有上游节点均不可用";
+    await prisma.apiUpstream.update({ where: { id: product.upstream.id }, data: { healthStatus: healthyCount ? "HEALTHY" : "UNHEALTHY", lastHealthCheckAt: new Date(), lastHealthError: healthyCount ? null : failureMessage } });
+    return Response.json({ code: healthyCount ? 200 : 503, message: healthyCount ? `${healthyCount} 个节点健康` : failureMessage, data: { healthy: Boolean(healthyCount), results } }, { status: healthyCount ? 200 : 503, headers: noStoreHeaders });
   }
   const clone = cloneSchema.safeParse(body);
   if (!clone.success) return Response.json({ code: 400, message: "操作参数不正确" }, { status: 400, headers: noStoreHeaders });
