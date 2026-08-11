@@ -1,7 +1,24 @@
-const token = process.env.INSTALL_TOKEN?.trim();
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+function deploymentToken() {
+  const configured = process.env.INSTALL_TOKEN?.trim();
+  if (configured) return configured;
+
+  const secretsDirectory = process.env.STAR_API_SECRETS_DIR?.trim();
+  if (!secretsDirectory) return "";
+
+  try {
+    return readFileSync(path.join(secretsDirectory, "INSTALL_TOKEN"), "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+const token = deploymentToken();
 
 if (!token || token.length < 32) {
-  console.error("INSTALL_TOKEN is missing or shorter than 32 characters.");
+  console.error("The deployment token is missing or shorter than 32 characters.");
   process.exit(1);
 }
 

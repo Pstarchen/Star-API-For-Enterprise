@@ -28,12 +28,11 @@ npm run dev
 
 ```bash
 cp .env.docker.example .env
-# 使用 openssl rand -hex 32 分别替换 .env 中的敏感变量
 docker compose config
 docker compose up -d --build
 ```
 
-启动后访问配置的 `SITE_ADDRESS`，首次进入 `/install` 创建平台管理员。健康检查地址为 `/api/health`，升级、备份、回滚和 HTTPS 说明见 [Docker 部署指南](docs/DEPLOYMENT.md)。
+首次启动会在独立持久卷中随机生成数据库密码、会话密钥、API Key Pepper、部署令牌和配置加密密钥，不需要在 `.env` 中填写敏感值。启动后访问配置的 `SITE_ADDRESS`，首次进入 `/install` 创建平台管理员。健康检查地址为 `/api/health`，升级、备份、回滚和 HTTPS 说明见 [Docker 部署指南](docs/DEPLOYMENT.md)。
 
 生产环境推荐使用版本镜像和宿主机反向代理：
 

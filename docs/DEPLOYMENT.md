@@ -21,15 +21,7 @@ cp .env.docker.example .env
 chmod 600 .env
 ```
 
-分别执行至少五次 `openssl rand -hex 32`，将不同结果写入：
-
-- `POSTGRES_PASSWORD`
-- `API_KEY_PEPPER`
-- `SESSION_SECRET`
-- `INSTALL_TOKEN`
-- `INTERNAL_GATEWAY_SECRET`
-
-生产环境还应生成独立的 `CONFIG_ENCRYPTION_KEY`，用于加密 OAuth、支付和上游鉴权配置。
+数据库密码、API Key Pepper、会话密钥、部署令牌、内部网关密钥和配置加密密钥由 `secrets-init` 在首次启动时随机生成，并写入 `starapi-secrets` 持久卷。后续重启和镜像升级只读取已有值，不会重新生成。
 
 将 `SITE_ADDRESS` 改为已解析的网站域名，例如 `example.com`。公开 API 与网站使用同一域名，通过 `/api/<接口路径>` 访问，不需要额外配置 `api.` 子域名。Caddy 会自动签发和续期 HTTPS 证书。随后启动：
 
@@ -97,22 +89,24 @@ mkdir -p backups
 BACKUP_ID=$(date +%F-%H%M)
 docker compose exec -T postgres pg_dump -U starapi -d starapi -Fc > "backups/starapi-${BACKUP_ID}.dump"
 docker compose run --rm --no-deps -v "$PWD/backups:/backup" app sh -c "tar -C /var/lib/star-api/assets -czf /backup/starapi-assets-${BACKUP_ID}.tar.gz ."
+docker compose run --rm --no-deps --entrypoint sh -v "$PWD/backups:/backup" secrets-init -c "tar -C /run/star-api-secrets -czf /backup/starapi-secrets-${BACKUP_ID}.tar.gz ."
 ```
 
-数据库保存媒体元数据，`starapi-api-assets` 卷保存图片和视频本体。两份备份必须使用同一个 `BACKUP_ID`、在同一维护窗口生成并一起异机保留。恢复前先在隔离环境验证备份：
+数据库保存媒体元数据，`starapi-api-assets` 卷保存图片和视频本体，`starapi-secrets` 卷保存数据库及平台密钥。三份备份必须使用同一个 `BACKUP_ID`、在同一维护窗口生成并一起异机保留。恢复前先在隔离环境验证备份。
 
 ```bash
 docker compose exec -T postgres pg_restore -U starapi -d starapi --clean --if-exists < backups/<备份文件>.dump
 docker compose stop app
 docker compose run --rm --no-deps -v "$PWD/backups:/backup" app sh -c 'find /var/lib/star-api/assets -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -C /var/lib/star-api/assets -xzf /backup/<媒体备份文件>.tar.gz'
+docker compose run --rm --no-deps --entrypoint sh -v "$PWD/backups:/backup" secrets-init -c 'find /run/star-api-secrets -mindepth 1 -maxdepth 1 -delete && tar -C /run/star-api-secrets -xzf /backup/<密钥备份文件>.tar.gz'
 docker compose start app
 ```
 
-停止容器但保留数据使用 `docker compose down`。不要在生产环境执行 `docker compose down -v`，它会删除数据库、图片视频、Redis 和 Caddy 数据卷。
+停止容器但保留数据使用 `docker compose down`。不要在生产环境执行 `docker compose down -v`，它会删除数据库、平台密钥、图片视频、Redis 和 Caddy 数据卷。
 
 ## 6. 上线清单
 
-- `.env` 权限为 `600`，所有敏感值互不相同且长度不少于 32 字符
+- `starapi-secrets` 已纳入加密备份，`.env` 中没有平台敏感密钥
 - 使用域名 HTTPS，`SESSION_COOKIE_SECURE=true`
 - 防火墙仅开放 SSH、80 和 443，数据库、Redis、Node 端口均不对外
 - `/install` 已关闭，普通用户无法访问 `/admin`

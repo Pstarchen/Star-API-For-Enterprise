@@ -7,16 +7,16 @@
 将发布工作流合并到默认分支后，推送语义化版本标签：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 GitHub Actions 将发布以下多架构镜像：
 
 ```text
-ghcr.io/pstarchen/star-api-app:0.1.0
-ghcr.io/pstarchen/star-api-migrator:0.1.0
-ghcr.io/pstarchen/star-api-php-runner:0.1.0
+ghcr.io/pstarchen/star-api-app:0.1.1
+ghcr.io/pstarchen/star-api-migrator:0.1.1
+ghcr.io/pstarchen/star-api-php-runner:0.1.1
 ```
 
 同时发布对应的 `sha-<commit>` 不可变标签，用于审计。GitHub 仓库的 Packages 页面必须将镜像设为公开；如果保持私有，服务器需要使用具有 `read:packages` 权限的 PAT 登录：
@@ -38,19 +38,12 @@ cp .env.production.example .env.production
 chmod 600 .env.production
 ```
 
-分别执行六次 `openssl rand -hex 32`，将不同结果写入：
-
-- `POSTGRES_PASSWORD`
-- `API_KEY_PEPPER`
-- `SESSION_SECRET`
-- `INSTALL_TOKEN`
-- `INTERNAL_GATEWAY_SECRET`
-- `CONFIG_ENCRYPTION_KEY`
+六项部署密钥由 `secrets-init` 在首次启动时随机生成，并写入 `starapi-secrets` 持久卷；`.env.production` 不保存这些密钥。旧版升级时，初始化器会在密钥卷为空的情况下导入旧 `.env.production` 中的值，确保已有 PostgreSQL 数据可以继续访问；确认升级成功后应删除旧敏感项并移除已退出的 `secrets-init` 容器。
 
 设置已发布的镜像版本、网站域名和外部地址：
 
 ```dotenv
-STAR_API_VERSION=0.1.0
+STAR_API_VERSION=0.1.1
 APP_BIND_ADDRESS=0.0.0.0
 APP_PORT=18081
 API_PUBLIC_HOST=example.com
@@ -100,13 +93,14 @@ docker compose --env-file .env.production -f compose.production.yml exec app nod
 
 ## 5. 版本升级
 
-升级前先创建同一时间点的数据库和媒体备份：
+升级前先创建同一时间点的数据库、媒体和密钥卷备份：
 
 ```bash
 mkdir -p backups
 BACKUP_ID=$(date +%F-%H%M)
 docker compose --env-file .env.production -f compose.production.yml exec -T postgres pg_dump -U starapi -d starapi -Fc > "backups/starapi-${BACKUP_ID}.dump"
 docker compose --env-file .env.production -f compose.production.yml run --rm --no-deps -v "$PWD/backups:/backup" app sh -c "tar -C /var/lib/star-api/assets -czf /backup/starapi-assets-${BACKUP_ID}.tar.gz ."
+docker compose --env-file .env.production -f compose.production.yml run --rm --no-deps --entrypoint sh -v "$PWD/backups:/backup" secrets-init -c "tar -C /run/star-api-secrets -czf /backup/starapi-secrets-${BACKUP_ID}.tar.gz ."
 ```
 
 只修改应用版本：
@@ -120,7 +114,7 @@ docker compose --env-file .env.production -f compose.production.yml logs --tail=
 curl --fail https://example.com/api/health
 ```
 
-Compose 会按新标签重建三个应用容器，PostgreSQL、Redis 和媒体卷保持不变。`POSTGRES_IMAGE`、`REDIS_IMAGE` 不跟随 `STAR_API_VERSION`，必须单独规划升级。
+Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷和密钥卷保持不变。`POSTGRES_IMAGE`、`REDIS_IMAGE` 不跟随 `STAR_API_VERSION`，必须单独规划升级。
 健康接口返回的 `version` 同样来自 `STAR_API_VERSION`，可用于确认反向代理后实际运行的版本。
 
 ## 6. 回滚边界
@@ -129,7 +123,7 @@ Compose 会按新标签重建三个应用容器，PostgreSQL、Redis 和媒体�
 
 1. 没有数据库变更时，可以改回旧 `STAR_API_VERSION` 并重新执行 `pull`、`up -d`。
 2. 存在不兼容迁移时，先停止应用，再配套恢复升级前的 PostgreSQL 和媒体备份。
-3. 不要执行 `docker compose down -v`，它会删除数据库、Redis 和媒体卷。
+3. 不要执行 `docker compose down -v`，它会删除数据库、平台密钥、Redis 和媒体卷。
 
 ## 7. 运维检查
 

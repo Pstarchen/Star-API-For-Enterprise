@@ -1,13 +1,35 @@
 name: star-api-platform
 
 services:
+  secrets-init:
+    image: ${STAR_API_APP_IMAGE:-ghcr.io/pstarchen/star-api-app}:${STAR_API_VERSION:?STAR_API_VERSION is required}
+    pull_policy: always
+    restart: "no"
+    user: "0:0"
+    environment:
+      STAR_API_SECRETS_DIR: /run/star-api-secrets
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      API_KEY_PEPPER: ${API_KEY_PEPPER:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      INSTALL_TOKEN: ${INSTALL_TOKEN:-}
+      INTERNAL_GATEWAY_SECRET: ${INTERNAL_GATEWAY_SECRET:-}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
+    entrypoint: ["/usr/local/bin/star-api-init-secrets"]
+    volumes:
+      - starapi-secrets:/run/star-api-secrets
+    network_mode: none
+
   migrate:
     image: ${STAR_API_MIGRATOR_IMAGE:-ghcr.io/pstarchen/star-api-migrator}:${STAR_API_VERSION:?STAR_API_VERSION is required}
     pull_policy: always
     restart: "no"
     environment:
-      DATABASE_URL: postgresql://starapi:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/starapi?schema=public
+      STAR_API_SECRETS_DIR: /run/star-api-secrets
+    volumes:
+      - starapi-secrets:/run/star-api-secrets:ro
     depends_on:
+      secrets-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
     networks:
@@ -21,26 +43,23 @@ services:
     environment:
       NODE_ENV: production
       APP_VERSION: ${STAR_API_VERSION:?STAR_API_VERSION is required}
-      DATABASE_URL: postgresql://starapi:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/starapi?schema=public
+      STAR_API_SECRETS_DIR: /run/star-api-secrets
       REDIS_URL: redis://redis:6379
-      API_KEY_PEPPER: ${API_KEY_PEPPER:?API_KEY_PEPPER is required}
-      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
-      INSTALL_TOKEN: ${INSTALL_TOKEN:?INSTALL_TOKEN is required}
-      INTERNAL_GATEWAY_SECRET: ${INTERNAL_GATEWAY_SECRET:?INTERNAL_GATEWAY_SECRET is required}
-      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?CONFIG_ENCRYPTION_KEY is required}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}
       API_PUBLIC_HOST: ${API_PUBLIC_HOST:?API_PUBLIC_HOST is required}
       API_PUBLIC_URL: ${API_PUBLIC_URL:?API_PUBLIC_URL is required}
       LOCAL_UPSTREAM_HOSTS: ${LOCAL_UPSTREAM_HOSTS:-host.docker.internal}
       PHP_RUNNER_URL: http://php-runner:8080/execute
-      PHP_RUNNER_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
       API_ASSET_STORAGE_PATH: /var/lib/star-api/assets
       MEDIA_MAX_API_GB: ${MEDIA_MAX_API_GB:-100}
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-18081}:3000"
     volumes:
       - starapi-api-assets:/var/lib/star-api/assets
+      - starapi-secrets:/run/star-api-secrets:ro
     depends_on:
+      secrets-init:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -67,12 +86,14 @@ services:
     pull_policy: always
     restart: unless-stopped
     environment:
-      RUNNER_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required}
+      STAR_API_SECRETS_DIR: /run/star-api-secrets
     expose:
       - "8080"
     read_only: true
     tmpfs:
       - /tmp:size=128m,mode=1777
+    volumes:
+      - starapi-secrets:/run/star-api-secrets:ro
     cap_drop:
       - ALL
     security_opt:
@@ -86,6 +107,9 @@ services:
       timeout: 3s
       start_period: 10s
       retries: 5
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     networks:
       - execution
 
@@ -95,9 +119,13 @@ services:
     environment:
       POSTGRES_DB: starapi
       POSTGRES_USER: starapi
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_PASSWORD_FILE: /run/star-api-secrets/POSTGRES_PASSWORD
     volumes:
       - starapi-postgres:/var/lib/postgresql/data
+      - starapi-secrets:/run/star-api-secrets:ro
+    depends_on:
+      secrets-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U starapi -d starapi"]
       interval: 5s
@@ -128,6 +156,7 @@ networks:
     internal: true
 
 volumes:
+  starapi-secrets:
   starapi-postgres:
   starapi-redis:
   starapi-api-assets:

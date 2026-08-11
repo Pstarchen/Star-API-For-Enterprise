@@ -22,6 +22,8 @@ RUN npm run build
 
 FROM dependencies AS migrator
 COPY prisma ./prisma
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/star-api-entrypoint
+ENTRYPOINT ["/usr/local/bin/star-api-entrypoint"]
 CMD ["npx", "prisma", "migrate", "deploy"]
 
 FROM ${NODE_IMAGE} AS runner
@@ -40,6 +42,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs scripts/show-install-token.mjs ./scripts/show-install-token.mjs
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/star-api-entrypoint
+COPY --chmod=755 scripts/init-deployment-secrets.sh /usr/local/bin/star-api-init-secrets
 
 USER nextjs
 EXPOSE 3000
@@ -47,4 +51,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3000/api/health >/dev/null || exit 1
 
+ENTRYPOINT ["/usr/local/bin/star-api-entrypoint"]
 CMD ["node", "server.js"]
