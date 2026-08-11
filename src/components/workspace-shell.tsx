@@ -17,9 +17,14 @@ import { cn } from "@/lib/utils";
 
 const workspaceIcons = { activity: Activity, apps: AppWindow, boxes: Boxes, building: Building2, billing: CreditCard, overview: Gauge, access: KeyRound, audits: ScrollText, settings: Settings, risk: ShieldCheck, users: Users, user: UserRound, webhooks: Webhook } as const;
 
-export type WorkspaceNavItem = { href: string; label: string; icon: keyof typeof workspaceIcons; badge?: string };
+export type WorkspaceSubNavItem = { href: string; label: string; icon: keyof typeof workspaceIcons; exact?: boolean };
+export type WorkspaceNavItem = { href: string; label: string; icon: keyof typeof workspaceIcons; badge?: string; items?: WorkspaceSubNavItem[] };
 export type WorkspaceOption = { id: string; name: string; type: "PERSONAL" | "ENTERPRISE"; status: string; role: string };
 type CurrentUser = { name: string; email: string; workspaces: WorkspaceOption[] };
+
+function routeMatches(pathname: string, href: string, exact = false) {
+  return pathname === href || (!exact && pathname.startsWith(`${href}/`));
+}
 
 export function WorkspaceShell({ children, nav, title, currentUser, admin = false }: { children: React.ReactNode; nav: WorkspaceNavItem[]; title: string; currentUser: CurrentUser; admin?: boolean }) {
   const pathname = usePathname();
@@ -29,6 +34,12 @@ export function WorkspaceShell({ children, nav, title, currentUser, admin = fals
   const [loggingOut, setLoggingOut] = useState(false);
   const workspace = currentUser.workspaces.find((item) => item.id === workspaceId) ?? currentUser.workspaces[0];
   const initials = currentUser.name.slice(0, 1).toUpperCase();
+  const activeGroup = nav.find((item) => item.items?.length
+    ? item.items.some((section) => routeMatches(pathname, section.href, section.exact))
+    : routeMatches(pathname, item.href, item.href === "/console" || item.href === "/admin")) ?? nav[0];
+  const activeSection = activeGroup?.items
+    ?.filter((item) => routeMatches(pathname, item.href, item.exact))
+    .sort((left, right) => right.href.length - left.href.length)[0];
 
   async function selectWorkspace(id: string) {
     setWorkspaceId(id);
@@ -57,7 +68,7 @@ export function WorkspaceShell({ children, nav, title, currentUser, admin = fals
 
       <div className="workspace-nav-label">工作台</div>
       <nav className="workspace-nav flex-1" aria-label={title}>{nav.map((item) => {
-        const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
+        const active = activeGroup?.href === item.href;
         const Icon = workspaceIcons[item.icon];
         return <Link key={item.href} href={item.href} className={cn("workspace-nav-item", active && "is-active")}><span className="workspace-nav-icon"><Icon /></span><span className="min-w-0 flex-1 truncate">{item.label}</span>{item.badge && <Badge variant="accent" className="h-[18px]">{item.badge}</Badge>}</Link>;
       })}</nav>
@@ -72,11 +83,13 @@ export function WorkspaceShell({ children, nav, title, currentUser, admin = fals
     <div className="min-w-0 lg:col-start-2">
       <header className="workspace-topbar sticky top-0 z-30">
         <div className="rounded-[7px] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-xs)] lg:hidden"><BrandMark compact /></div>
-        <div className="min-w-0"><span className="block text-[9px] font-semibold text-[var(--accent-strong)]">{admin ? "STAR OPERATIONS" : workspace?.name ?? "STAR WORKSPACE"}</span><h1 className="truncate text-[16px] font-bold">{title}</h1></div>
+        <div className="workspace-topbar-title min-w-0"><span className="block text-[9px] font-semibold text-[var(--accent-strong)]">{admin ? "STAR OPERATIONS" : workspace?.name ?? "STAR WORKSPACE"}</span><h1 className="truncate text-[16px] font-bold">{admin && activeGroup ? activeGroup.label : title}</h1></div>
+        {activeGroup?.items?.length ? <nav className="workspace-section-nav hidden lg:flex" aria-label={`${activeGroup.label}模块`}>{activeGroup.items.map((item) => { const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("workspace-section-item", activeSection?.href === item.href && "is-active")}><Icon />{item.label}</Link>; })}</nav> : null}
         {!admin && workspace && <Select value={workspaceId} onValueChange={selectWorkspace}><SelectTrigger size="sm" className="ml-auto w-28 shrink-0 lg:hidden" aria-label="当前工作区"><SelectValue /></SelectTrigger><SelectContent>{currentUser.workspaces.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent></Select>}
         <div className={cn("flex items-center gap-1", admin ? "ml-auto" : "lg:ml-auto")}><span className="mr-2 hidden items-center gap-2 text-[9px] text-[var(--muted)] sm:flex"><span className="size-1.5 rounded-full bg-[var(--success)]" />服务在线</span><Tooltip><TooltipTrigger asChild><ThemeToggle className="grid size-9 place-items-center rounded-[7px] text-[var(--muted)] transition hover:bg-[var(--surface-subtle)] hover:text-[var(--ink)]" /></TooltipTrigger><TooltipContent>切换深浅色模式</TooltipContent></Tooltip><Tooltip><TooltipTrigger asChild><Button type="button" variant="ghost" size="icon" onClick={logout} disabled={loggingOut} className="lg:hidden" aria-label="退出登录"><LogOut /></Button></TooltipTrigger><TooltipContent>退出登录</TooltipContent></Tooltip></div>
       </header>
-      <nav className="workspace-mobile-nav lg:hidden" aria-label="移动端控制台导航">{nav.map((item) => { const active = item.href === "/console" || item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href); const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("workspace-mobile-item", active && "is-active")}><Icon />{item.label}{item.badge && <Badge variant="accent" className="h-4 px-1.5 text-[8px]">{item.badge}</Badge>}</Link>; })}</nav>
+      <nav className="workspace-mobile-nav lg:hidden" aria-label="移动端控制台导航">{nav.map((item) => { const active = activeGroup?.href === item.href; const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("workspace-mobile-item", active && "is-active")}><Icon />{item.label}{item.badge && <Badge variant="accent" className="h-4 px-1.5 text-[8px]">{item.badge}</Badge>}</Link>; })}</nav>
+      {activeGroup?.items?.length ? <nav className="workspace-context-nav lg:hidden" aria-label={`${activeGroup.label}子导航`}>{activeGroup.items.map((item) => { const Icon = workspaceIcons[item.icon]; return <Link key={item.href} href={item.href} className={cn("workspace-context-item", activeSection?.href === item.href && "is-active")}><Icon />{item.label}</Link>; })}</nav> : null}
       <main className="workspace-content">{children}</main>
     </div>
   </div></TooltipProvider>;

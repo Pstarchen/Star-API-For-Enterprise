@@ -29,7 +29,7 @@ export default async function Home() {
           <div className="home-kicker"><Sparkles />API OPEN DISTRIBUTION</div>
           <h1>{platform.name}</h1>
           <p>{platform.description}</p>
-          <div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg"><Link href="/register">开始接入<ArrowRight /></Link></Button><Button asChild variant="secondary" size="lg" className="bg-white/90"><Link href="/marketplace"><Code2 />浏览 API</Link></Button></div>
+          <div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg"><Link href="/register">开始接入<ArrowRight /></Link></Button><Button asChild variant="secondary" size="lg" className="home-secondary-action"><Link href="/marketplace"><Code2 />浏览 API</Link></Button></div>
           <div className="home-route-line"><span><Route />统一网关</span><span><KeyRound />密钥鉴权</span><span><CircleGauge />计量计费</span></div>
         </div>
       </div>

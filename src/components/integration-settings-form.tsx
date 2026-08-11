@@ -97,9 +97,10 @@ const definitions: Record<IntegrationKey, Definition> = {
   },
 };
 
-export function IntegrationSettingsForm({ initial }: { initial: IntegrationSummary[] }) {
+export function IntegrationSettingsForm({ initial, keys, eyebrow = "PLATFORM INTEGRATIONS", title = "登录、邮件与收款", description = "敏感凭据加密保存，后台只显示配置状态，不回传原文。" }: { initial: IntegrationSummary[]; keys?: IntegrationKey[]; eyebrow?: string; title?: string; description?: string }) {
+  const visibleKeys = keys?.length ? keys : Object.keys(definitions) as IntegrationKey[];
   const [items, setItems] = useState(initial);
-  const [active, setActive] = useState<IntegrationKey>("github");
+  const [active, setActive] = useState<IntegrationKey>(visibleKeys[0]);
   const current = useMemo(
     () => items.find((item) => item.key === active) ?? { key: active, enabled: false, configured: false, publicConfig: {} },
     [active, items],
@@ -108,13 +109,13 @@ export function IntegrationSettingsForm({ initial }: { initial: IntegrationSumma
   return (
     <div className="page-shell max-w-3xl space-y-5">
       <div>
-        <p className="eyebrow">PLATFORM INTEGRATIONS</p>
-        <h2 className="mt-1 text-xl font-bold">登录、邮件与收款</h2>
-        <p className="mt-1 text-[11px] text-[var(--muted)]">敏感凭据加密保存，后台只显示配置状态，不回传原文。</p>
+        <p className="eyebrow">{eyebrow}</p>
+        <h2 className="mt-1 text-xl font-bold">{title}</h2>
+        <p className="mt-1 text-[11px] text-[var(--muted)]">{description}</p>
       </div>
       <Tabs value={active} onValueChange={(value) => setActive(value as IntegrationKey)}>
-      <TabsList className="grid h-auto w-full grid-cols-2 sm:grid-cols-5">
-        {(Object.keys(definitions) as IntegrationKey[]).map((key) => {
+      <TabsList className="grid h-auto w-full" style={{ gridTemplateColumns: `repeat(${visibleKeys.length}, minmax(0, 1fr))` }}>
+        {visibleKeys.map((key) => {
           const item = items.find((value) => value.key === key);
           const Icon = definitions[key].icon;
           return (

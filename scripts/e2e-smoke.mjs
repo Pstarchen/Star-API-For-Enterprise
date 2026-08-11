@@ -126,7 +126,7 @@ async function main() {
   expectStatus(result.response.status, 200, "administrator session", result.body);
   assert.equal(result.body.data.platformRole, "ADMIN");
 
-  for (const page of ["/admin", "/admin/apis", "/admin/providers", "/admin/users", "/admin/settings", "/admin/monitor", "/admin/audits"]) {
+  for (const page of ["/admin", "/admin/apis", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
     response = await request(page, {}, adminCookie);
     expectStatus(response.status, 200, `administrator page ${page}`, await response.text());
   }
@@ -238,6 +238,15 @@ async function main() {
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
   for (const product of [staticApi, textApi, imageApi, phpApi, builtinApi, localApi, externalApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
+
+  result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "Admin API Test App", environment: "TEST" } }, adminCookie);
+  expectStatus(result.response.status, 201, "administrator creates test application and API key", result.body);
+  const adminAppId = result.body.data.app.id;
+  const adminApiKey = result.body.data.secret;
+  assert.match(adminApiKey, /^sk_test_/);
+  await subscribe(adminCookie, adminAppId, quickApi.id, `admin-${quickApi.slug}`);
+  response = await request(`/${quickApi.slug}`, { headers: { Authorization: `Bearer ${adminApiKey}` } }, "", apiUrl);
+  expectStatus(response.status, 200, "administrator API key gateway call", await response.text());
 
   response = await request("/docs");
   const docsHtml = await response.text();
