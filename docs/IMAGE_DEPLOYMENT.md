@@ -93,6 +93,28 @@ docker compose --env-file .env.production -f compose.production.yml exec app nod
 
 ## 5. 版本升级
 
+### 推荐：服务器更新器
+
+仓库提供服务器侧更新器。它不会把 Docker Socket 暴露给网站，也不会读取或显示环境文件中的密钥。更新器会检查最新稳定 Git 标签及三套镜像，创建 PostgreSQL、媒体卷和密钥卷备份，再修改 `STAR_API_VERSION`、执行迁移并验证健康接口中的版本号和数据库状态。
+
+```bash
+cd /opt/Star-API-For-Enterprise
+bash scripts/update-production.sh --check
+bash scripts/update-production.sh
+```
+
+指定版本升级：
+
+```bash
+bash scripts/update-production.sh 0.1.6
+```
+
+更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
+
+迁移执行后不会自动切回旧镜像，因为旧应用不一定兼容新数据库。失败时脚本会保留目标版本、输出日志命令和备份路径，由管理员根据发布说明决定修复当前版本或完整恢复数据库、媒体与密钥备份。
+
+### 手工升级
+
 升级前先创建同一时间点的数据库、媒体和密钥卷备份：
 
 ```bash

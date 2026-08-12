@@ -6,6 +6,7 @@ import { unzipSync } from "fflate";
 import { parseAllDocuments } from "yaml";
 import type { ApiDataType, ApiRequestParameter, ApiResponseParameter } from "@/lib/api-contracts";
 import type { ContentHandlerId } from "@/lib/internal-handlers";
+import { normalizePackagePath, resolvePhpEntryFile } from "@/lib/php-package";
 import { prisma } from "@/lib/server/prisma";
 import { storedMediaResponse } from "@/lib/server/media-storage";
 
@@ -35,27 +36,41 @@ function ownedArray(value: Uint8Array): Uint8Array<ArrayBuffer> {
   return data;
 }
 
-export function normalizePackagePath(value: string) {
-  const normalized = value.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/{2,}/g, "/");
-  if (!normalized || normalized.startsWith("/") || normalized.includes("\0") || normalized.split("/").some((part) => !part || part === "." || part === "..")) throw new Error("INVALID_PACKAGE_PATH");
-  return normalized;
-}
-
 export async function preparePhpPackage(file: File | undefined, entryFile: string) {
   if (!file || file.size <= 0) throw new Error("PHP_PACKAGE_REQUIRED");
   if (file.size > MAX_PHP_PACKAGE_BYTES) throw new Error("PHP_PACKAGE_TOO_LARGE");
-  const entry = normalizePackagePath(entryFile || "index.php");
-  if (!entry.toLowerCase().endsWith(".php")) throw new Error("INVALID_PHP_ENTRY");
   let unpacked: Record<string, Uint8Array>;
-  try { unpacked = unzipSync(new Uint8Array(await file.arrayBuffer())); } catch { throw new Error("INVALID_ZIP"); }
+  let expandedFiles = 0;
+  let expandedBytes = 0;
+  try {
+    unpacked = unzipSync(new Uint8Array(await file.arrayBuffer()), {
+      filter(entry) {
+        if (entry.name.endsWith("/")) return false;
+        normalizePackagePath(entry.name);
+        expandedFiles += 1;
+        expandedBytes += entry.originalSize;
+        if (expandedFiles > 200) throw new Error("INVALID_PACKAGE_FILE_COUNT");
+        if (entry.originalSize > MAX_IMAGE_BYTES) throw new Error("PACKAGE_FILE_TOO_LARGE");
+        if (expandedBytes > MAX_PHP_EXTRACTED_BYTES) throw new Error("PHP_EXTRACTED_TOO_LARGE");
+        return true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof Error && ["INVALID_PACKAGE_PATH", "INVALID_PACKAGE_FILE_COUNT", "PACKAGE_FILE_TOO_LARGE", "PHP_EXTRACTED_TOO_LARGE"].includes(error.message)) throw error;
+    throw new Error("INVALID_ZIP");
+  }
   const files = Object.entries(unpacked).filter(([name]) => !name.endsWith("/"));
   if (!files.length || files.length > 200) throw new Error("INVALID_PACKAGE_FILE_COUNT");
+  const normalizedPaths = new Set<string>();
   const prepared = files.map(([name, bytes]) => {
     const path = normalizePackagePath(name);
+    const comparablePath = path.toLowerCase();
+    if (normalizedPaths.has(comparablePath)) throw new Error("DUPLICATE_PACKAGE_PATH");
+    normalizedPaths.add(comparablePath);
     if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("PACKAGE_FILE_TOO_LARGE");
     return { kind: "PHP_SOURCE" as const, name: path, groupKey: "", mimeType: "application/octet-stream", data: ownedArray(bytes), size: bytes.byteLength };
   });
-  if (!prepared.some((item) => item.name === entry)) throw new Error("PHP_ENTRY_NOT_FOUND");
+  const entry = resolvePhpEntryFile(prepared.map((item) => item.name), entryFile);
   if (prepared.reduce((sum, item) => sum + item.size, 0) > MAX_PHP_EXTRACTED_BYTES) throw new Error("PHP_EXTRACTED_TOO_LARGE");
   return { entryFile: entry, assets: prepared };
 }
@@ -348,11 +363,13 @@ export function assetErrorMessage(error: unknown) {
     PHP_PACKAGE_REQUIRED: "请选择包含 PHP 源码和附属文件的 ZIP 包",
     PHP_PACKAGE_TOO_LARGE: `PHP ZIP 包不能超过 ${MAX_PHP_PACKAGE_BYTES / 1024 / 1024} MB`,
     INVALID_PACKAGE_PATH: "ZIP 中包含不安全的文件路径",
+    DUPLICATE_PACKAGE_PATH: "ZIP 中包含重复或仅大小写不同的文件路径",
     INVALID_PHP_ENTRY: "入口文件必须是 PHP 文件",
     INVALID_ZIP: "无法读取 ZIP 程序包",
     INVALID_PACKAGE_FILE_COUNT: "PHP 程序包必须包含 1 至 200 个文件",
     PACKAGE_FILE_TOO_LARGE: `程序包内单个文件不能超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`,
-    PHP_ENTRY_NOT_FOUND: "ZIP 中没有找到指定的 PHP 入口文件",
+    PHP_ENTRY_NOT_FOUND: error.message.includes(":") ? `ZIP 中没有找到指定入口：${error.message.split(":").slice(1).join(":")}` : "ZIP 中没有找到 PHP 文件，请确认程序包包含可执行的 .php 源文件",
+    PHP_ENTRY_AMBIGUOUS: `ZIP 中存在多个可能的 PHP 入口，请填写完整相对路径：${error.message.split(":").slice(1).join(":").split("|").join("、")}`,
     PHP_EXTRACTED_TOO_LARGE: `PHP 程序包解压后不能超过 ${MAX_PHP_EXTRACTED_BYTES / 1024 / 1024} MB`,
   };
   return messages[errorCode] ?? null;

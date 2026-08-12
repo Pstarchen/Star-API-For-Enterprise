@@ -188,7 +188,7 @@ export async function POST(request: Request) {
     }
   }
   let assets: PreparedAsset[] = [];
-  let phpEntryFile = input.entryFile || "index.php";
+  let phpEntryFile = input.entryFile;
   try {
     if (handler && handler !== "content.random-video" && (handler !== "content.random-image" || payload.files.length)) assets = await prepareApiAssets(handler, { files: payload.files, content: input.content });
     if (input.sourceType === "PHP_PACKAGE") {
@@ -242,7 +242,7 @@ export async function POST(request: Request) {
           categoryId: category.id,
           color: input.color,
           tags: input.tags,
-          featured: input.featured,
+          featured: auth.isAdmin && input.featured,
           visibility: input.visibility,
           sla: input.sla,
           internalHandler: selectedHandler,
@@ -256,7 +256,7 @@ export async function POST(request: Request) {
           versions: {
             create: {
               version,
-              basePath: `https://${input.publicHost}`,
+              basePath: `${input.forceHttps ? "https" : "http"}://${input.publicHost}`,
               endpoints: {
                 create: {
                   methods,

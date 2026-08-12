@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:php-package": "node --experimental-strip-types scripts/test-php-package.mjs",
     "test:stress": "node scripts/stress-e2e.mjs",
     "install:token": "node scripts/show-install-token-docker.mjs",
     "install:token:host": "node --env-file=.env.production.local scripts/show-install-token.mjs",

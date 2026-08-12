@@ -341,32 +341,28 @@ async function main() {
   const genericDatasetConfig = result.body.data;
   result = await jsonRequest("/api/v1/admin/apis/config", { method: "PATCH", body: {
     id: genericDatasetConfig.id,
+    name: "Generic Dataset Smoke Updated",
+    shortName: "Data",
+    description: "Updated through the complete API configuration editor.",
+    color: "#4f46e5",
+    tags: ["e2e", "updated"],
+    featured: true,
+    sla: "99.95",
     categoryId: genericDatasetConfig.categoryId,
     visibility: genericDatasetConfig.visibility,
     billingMode: genericDatasetConfig.billingMode,
     unitPrice: genericDatasetConfig.unitPrice,
     freeQuotaMonthly: genericDatasetConfig.freeQuotaMonthly,
     defaultQpsLimit: genericDatasetConfig.defaultQpsLimit,
-    route: {
-      publicHost: genericDatasetConfig.route.publicHost,
-      publicPath: genericDatasetConfig.route.publicPath,
-      routeVersion: genericDatasetConfig.route.routeVersion,
-      methods: genericDatasetConfig.route.methods,
-      requestFormat: genericDatasetConfig.route.requestFormat,
-      responseFormats: genericDatasetConfig.route.responseFormats,
-      corsEnabled: genericDatasetConfig.route.corsEnabled,
-      forceHttps: genericDatasetConfig.route.forceHttps,
-      requestLogging: genericDatasetConfig.route.requestLogging,
-      dailyLimit: genericDatasetConfig.route.dailyLimit,
-      ipAllowlist: genericDatasetConfig.route.ipAllowlist,
-      ipDenylist: genericDatasetConfig.route.ipDenylist,
-    },
+    route: { ...genericDatasetConfig.route, methods: ["GET", "POST"], summary: "Updated generic dataset summary" },
     upstream: { rewriteMode: genericDatasetConfig.upstream.rewriteMode, upstreamPrefix: genericDatasetConfig.upstream.upstreamPrefix, healthPath: genericDatasetConfig.upstream.healthPath, timeoutMs: genericDatasetConfig.upstream.timeoutMs, authType: genericDatasetConfig.upstream.authType, preserveSecret: genericDatasetConfig.upstream.secretConfigured, token: "", headerName: "", headerValue: "", nodes: genericDatasetConfig.upstream.nodes.map(({ id, name, baseUrl, weight, enabled }) => ({ id, name, baseUrl, weight, enabled })) },
     parameters: genericDatasetConfig.parameters.map(({ location, name, upstreamName, required, dataType, defaultValue, description, pattern, sensitive }) => ({ location, name, upstreamName, required, dataType, defaultValue, description, pattern, sensitive })),
     responseParameters: [{ name: "headline", dataType: "string", description: "Selected record headline" }],
     dataset: { ...genericDatasetConfig.dataset, itemsPath: "envelope.entries", textField: "headline" },
   } }, adminCookie);
   expectStatus(result.response.status, 200, "update a generic dataset contract", result.body);
+  assert.equal(result.body.data.name, "Generic Dataset Smoke Updated", "API basic metadata must be editable after creation");
+  assert.deepEqual(result.body.data.methods, ["GET", "POST"], "GET and POST must remain editable together");
   assert.equal(result.body.data.responseExample.headline, "generic-alpha", "contract edits must preserve an example derived from current data");
   const scalarDatasetApi = await createApi(adminCookie, {
     sourceType: "DATASET",
@@ -583,14 +579,48 @@ components:
   await uploadMedia(adminCookie, cleanupVideoApi.id, "delete-me.mp4", tinyMp4, "video/mp4");
   response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(cleanupVideoApi.id)}`, { method: "DELETE" }, adminCookie);
   expectStatus(response.status, 200, "delete draft media API and stored file", await response.json());
-  const phpArchive = zipSync({ "index.php": strToU8("<?php header('Content-Type: application/json'); echo json_encode(['ok' => true, 'source' => 'php']);") });
-  const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, methods: ["ALL"], entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
+  const phpArchive = zipSync({ "hitokoto-service/index.php": strToU8("<?php header('Content-Type: application/json'); $items = json_decode(file_get_contents('data/a.json'), true); echo json_encode(['ok' => true, 'source' => 'php', 'text' => $items[0]]);"), "hitokoto-service/data/a.json": strToU8('["hello"]') });
+  const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, methods: ["ALL"], entryFile: "" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(phpApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "read auto-detected nested PHP entry", result.body);
+  assert.equal(result.body.data.entryFile, "hitokoto-service/index.php", "nested PHP entry must be detected and persisted");
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
   const digestApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "SHA-256 Smoke", slug: `digest-${runId}`, methods: ["POST"], internalHandler: "crypto.sha256" });
   const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}/fixed/`, rewriteMode: "EXACT", healthPath: "/health" });
   const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
   const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Second External Upstream Smoke", slug: `external-second-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
   const tunnelApi = await createApi(adminCookie, { sourceType: "TUNNEL", name: "Tunnel Upstream Smoke", slug: `tunnel-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(externalApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "read external API configuration", result.body);
+  const externalConfig = result.body.data;
+  result = await jsonRequest("/api/v1/admin/apis/config", { method: "PATCH", body: {
+    id: externalConfig.id,
+    name: "External Upstream Smoke Updated",
+    shortName: "Ext",
+    description: "Updated public upstream configuration.",
+    color: "#0f766e",
+    tags: ["e2e", "external"],
+    featured: false,
+    sla: "99.9",
+    categoryId: externalConfig.categoryId,
+    visibility: externalConfig.visibility,
+    billingMode: externalConfig.billingMode,
+    unitPrice: externalConfig.unitPrice,
+    freeQuotaMonthly: externalConfig.freeQuotaMonthly,
+    defaultQpsLimit: externalConfig.defaultQpsLimit,
+    route: { ...externalConfig.route, methods: ["GET", "POST"], responseExample: null, summary: "Editable external API contract", forceHttps: false },
+    upstream: { rewriteMode: externalConfig.upstream.rewriteMode, upstreamPrefix: externalConfig.upstream.upstreamPrefix, healthPath: externalConfig.upstream.healthPath, timeoutMs: externalConfig.upstream.timeoutMs, authType: externalConfig.upstream.authType, preserveSecret: externalConfig.upstream.secretConfigured, token: "", headerName: "", headerValue: "", nodes: externalConfig.upstream.nodes.map(({ name, baseUrl, weight, enabled }) => ({ name, baseUrl, weight, enabled })) },
+    parameters: [{ location: "QUERY", name: "topic", upstreamName: "topic", required: false, dataType: "string", defaultValue: "", description: "Optional upstream topic", pattern: "", sensitive: false }],
+    responseParameters: [{ name: "body", dataType: "string", description: "Upstream response body" }],
+  } }, adminCookie);
+  expectStatus(result.response.status, 200, "update external API complete configuration", result.body);
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(externalApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "confirm external API configuration persistence", result.body);
+  assert.equal(result.body.data.name, "External Upstream Smoke Updated");
+  assert.deepEqual(result.body.data.route.methods, ["GET", "POST"]);
+  assert.equal(result.body.data.route.responseExample, null, "JSON null must persist as a valid response example");
+  assert.deepEqual(result.body.data.parameters.map(({ name, location }) => ({ name, location })), [{ name: "topic", location: "QUERY" }]);
+  assert.deepEqual(result.body.data.responseParameters.map(({ name, dataType }) => ({ name, dataType })), [{ name: "body", dataType: "string" }]);
 
   const quickForm = new FormData();
   quickForm.set("config", JSON.stringify({ sourceType: "STATIC_JSON", categoryId: defaultCategoryId, name: "快速接口", content: JSON.stringify({ ok: true, source: "quick-create" }) }));
@@ -839,7 +869,9 @@ components:
   assert.equal(response.headers.get("accept-ranges"), "bytes");
   assert.equal(response.headers.get("content-type"), "video/mp4");
   response = await request(phpApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
-  expectStatus(response.status, 200, "isolated PHP gateway call", await response.text());
+  const phpResponse = await response.json();
+  expectStatus(response.status, 200, "isolated nested PHP gateway call", phpResponse);
+  assert.deepEqual(phpResponse, { ok: true, source: "php", text: "hello" });
   response = await request(builtinApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "built-in API gateway call", await response.text());
   response = await request(digestApi.endpoint, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "text/plain" }, body: "general-purpose-input" });

@@ -61,6 +61,7 @@ try {
     }
     $script = $directory . '/' . $entry;
     if (!is_file($script)) respond(400, ['message' => 'entry file missing']);
+    $entryDirectory = dirname($script);
 
     $request = $input['request'];
     $body = base64_decode((string)($request['body'] ?? ''), true);
@@ -84,7 +85,7 @@ try {
         'QUERY_STRING' => $query,
         'SCRIPT_FILENAME' => $script,
         'SCRIPT_NAME' => '/' . $entry,
-        'DOCUMENT_ROOT' => $directory,
+        'DOCUMENT_ROOT' => $entryDirectory,
         'CONTENT_LENGTH' => (string)strlen($body),
         'CONTENT_TYPE' => (string)($headers['content-type'] ?? ''),
     ];
@@ -97,7 +98,7 @@ try {
     $phpCgi = getenv('PHP_CGI_BINARY') ?: 'php-cgi83';
     $command = [$phpCgi, '-d', 'open_basedir=' . $directory, '-d', 'allow_url_fopen=0', '-d', 'allow_url_include=0', '-d', 'disable_functions=' . $disabled, '-d', 'memory_limit=128M', '-d', 'max_execution_time=10', '-d', 'display_errors=0', '-d', 'log_errors=0', '-d', 'expose_php=0'];
     $pipes = [];
-    $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $directory, $environment);
+    $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $entryDirectory, $environment);
     if (!is_resource($process)) respond(500, ['message' => 'runtime unavailable']);
     fwrite($pipes[0], $body); fclose($pipes[0]);
     stream_set_blocking($pipes[1], false); stream_set_blocking($pipes[2], false);

@@ -482,6 +482,14 @@ a:not([class]) { color: inherit; }
 .portal-brand-island { flex: 0 0 auto; padding-inline: 10px 13px; }
 .portal-links-island { flex: 0 0 auto; padding-inline: 5px; }
 .portal-actions-island { flex: 0 0 auto; padding-inline: 5px; }
+.portal-action-control {
+  height: 36px;
+  border-radius: 999px;
+}
+.portal-action-control:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-soft);
+}
 .portal-mobile-island { width: 100%; padding-inline: 7px; }
 
 .portal-header[data-scroll-state="down"] .portal-nav {
