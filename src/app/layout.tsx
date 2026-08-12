@@ -12,7 +12,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: { default: `${config.name} - API 开放分发平台`, template: `%s | ${config.name}` },
     description: config.description,
-    ...(config.hasCustomIcon ? { icons: { icon: platformIconUrl(config) } } : {}),
+    icons: { icon: config.hasCustomIcon ? platformIconUrl(config) : "/favicon.ico" },
   };
 }
 

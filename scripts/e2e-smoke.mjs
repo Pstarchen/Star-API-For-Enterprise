@@ -9,6 +9,8 @@ const runId = Date.now().toString(36);
 const password = `Smoke-${runId}-Pass9`;
 const results = [];
 let defaultCategoryId = "";
+const installIcon = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nZcAAAAASUVORK5CYII=", "base64");
+const replacementIcon = Buffer.concat([installIcon, Buffer.from("replacement")]);
 const localUpstreamPort = Number(process.env.E2E_LOCAL_UPSTREAM_PORT ?? 19090);
 const localServer = createServer((request, response) => {
   response.setHeader("Content-Type", "application/json");
@@ -45,6 +47,12 @@ function expectStatus(actual, expected, label, body) {
   assert.equal(actual, expected, `${label}: expected ${expected}, received ${actual}; body=${JSON.stringify(body)}`);
   results.push(label);
   console.log(`PASS ${label}`);
+}
+
+function pageIconHrefs(html) {
+  return [...html.matchAll(/<link\b[^>]*\brel=["']icon["'][^>]*>/gi)]
+    .map(([tag]) => tag.match(/\bhref=["']([^"']+)["']/i)?.[1])
+    .filter(Boolean);
 }
 
 async function createApi(cookie, config, assets = []) {
@@ -112,6 +120,7 @@ async function main() {
     platformName: "Star-API E2E",
     platformDescription: "Automated end-to-end verification environment.",
     publicUrl: portalUrl,
+    iconDataUrl: `data:image/png;base64,${installIcon.toString("base64")}`,
     adminName: "Smoke Admin",
     adminEmail,
     adminPassword: password,
@@ -119,6 +128,18 @@ async function main() {
   expectStatus(result.response.status, 201, "first installation", result.body);
   const adminCookie = cookieFrom(result.response);
   assert.ok(adminCookie, "installer must create an administrator session");
+
+  response = await request("/");
+  const installedPageHtml = await response.text();
+  expectStatus(response.status, 200, "installed platform page", installedPageHtml);
+  const installedIconHrefs = pageIconHrefs(installedPageHtml);
+  assert.equal(installedIconHrefs.length, 1, "the page must declare exactly one favicon");
+  assert.match(installedIconHrefs[0], /^\/api\/v1\/branding\/icon\?v=/, "the favicon must use the installed website icon");
+  response = await request(installedIconHrefs[0]);
+  const installedIconBytes = Buffer.from(await response.arrayBuffer());
+  expectStatus(response.status, 200, "installed website icon", installedIconBytes.length);
+  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.deepEqual(installedIconBytes, installIcon);
 
   result = await jsonRequest("/api/v1/auth/me", {}, adminCookie);
   expectStatus(result.response.status, 200, "administrator session", result.body);
@@ -139,12 +160,21 @@ async function main() {
   expectStatus(response.status, 200, "delete unused API category", await response.json());
 
   const heroDataUrl = `data:image/jpeg;base64,${readFileSync(new URL("../public/art/anime-operator.jpg", import.meta.url)).toString("base64")}`;
-  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "replace", heroDataUrl } }, adminCookie);
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "replace", iconDataUrl: `data:image/png;base64,${replacementIcon.toString("base64")}`, heroAction: "replace", heroDataUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "update hero and filing settings", result.body);
   assert.equal(result.body.data.hasCustomHero, true);
+  assert.equal(result.body.data.hasCustomIcon, true);
+  response = await request("/");
+  const replacedIconHrefs = pageIconHrefs(await response.text());
+  assert.equal(replacedIconHrefs.length, 1, "the page must keep a single favicon after a settings update");
+  assert.notEqual(replacedIconHrefs[0], installedIconHrefs[0], "the favicon URL revision must change after replacement");
+  response = await request(replacedIconHrefs[0]);
+  const replacedIconBytes = Buffer.from(await response.arrayBuffer());
+  expectStatus(response.status, 200, "replaced website icon", replacedIconBytes.length);
+  assert.deepEqual(replacedIconBytes, replacementIcon);
   response = await request("/api/v1/branding/hero");
   expectStatus(response.status, 200, "custom hero asset", await response.arrayBuffer());
-  assert.equal(response.headers.get("content-type"), "image/png");
+  assert.equal(response.headers.get("content-type"), "image/jpeg");
 
   for (const page of ["/admin", "/admin/apis", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
     response = await request(page, {}, adminCookie);
@@ -153,7 +183,7 @@ async function main() {
 
   result = await jsonRequest("/api/v1/admin/auth-policy", {}, adminCookie);
   expectStatus(result.response.status, 200, "read authentication policy", result.body);
-  assert.deepEqual(result.body.data, { passwordLoginEnabled: true, registrationEnabled: true });
+  assert.deepEqual(result.body.data, { passwordLoginEnabled: true, registrationEnabled: true, registrationEmailVerificationRequired: false });
 
   response = await request("/api/v1/auth/oauth/github");
   expectStatus(response.status, 302, "GitHub disabled redirect", await response.text());
@@ -183,17 +213,17 @@ async function main() {
   response = await request("/auth/oauth/callback?next=/admin/settings/integrations", {}, adminCookie);
   expectStatus(response.status, 200, "OAuth frontend completion page", await response.text());
 
-  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: false, registrationEnabled: false } }, adminCookie);
+  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: false, registrationEnabled: false, registrationEmailVerificationRequired: false } }, adminCookie);
   expectStatus(result.response.status, 409, "prevent administrator login lockout", result.body);
 
-  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: true, registrationEnabled: false } }, adminCookie);
+  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: true, registrationEnabled: false, registrationEmailVerificationRequired: false } }, adminCookie);
   expectStatus(result.response.status, 200, "disable registration", result.body);
   result = await jsonRequest("/api/v1/auth/register", { method: "POST", body: { accountType: "personal", name: "Blocked User", email: `blocked-${runId}@example.test`, password, acceptedTerms: true } });
   expectStatus(result.response.status, 403, "registration API disabled", result.body);
   response = await request("/register");
   expectStatus(response.status, 200, "registration disabled page", await response.text());
 
-  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: true, registrationEnabled: true } }, adminCookie);
+  result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: true, registrationEnabled: true, registrationEmailVerificationRequired: false } }, adminCookie);
   expectStatus(result.response.status, 200, "enable registration", result.body);
 
   const personalEmail = `personal-${runId}@example.test`;
@@ -204,6 +234,7 @@ async function main() {
   result = await jsonRequest("/api/v1/auth/me", {}, personalCookie);
   expectStatus(result.response.status, 200, "personal user session", result.body);
   assert.equal(result.body.data.workspaces[0].status, "ACTIVE");
+  const personalTenantId = result.body.data.workspaces[0].id;
 
   result = await jsonRequest("/api/v1/auth/login", { method: "POST", body: { email: personalEmail, password, remember: false } });
   expectStatus(result.response.status, 200, "personal password login", result.body);
@@ -345,6 +376,10 @@ async function main() {
   expectStatus(result.response.status, 200, "statistics before gateway calls", result.body);
   const callsBefore = result.body.data.totalCalls;
 
+  result = await jsonRequest("/api/v1/admin/wallet", { method: "PATCH", body: { tenantId: personalTenantId, type: "ADMIN_RECHARGE", amount: "10.00", reason: "E2E paid API verification" } }, adminCookie);
+  expectStatus(result.response.status, 200, "administrator funds paid API test account", result.body);
+  assert.equal(result.body.data.balance, "10");
+
   response = await request(staticApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway static JSON call", await response.text());
   assert.equal(response.headers.get("x-request-cost"), "0.25");
@@ -396,7 +431,13 @@ async function main() {
   response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(removableApi.id)}`, { method: "DELETE" }, adminCookie);
   expectStatus(response.status, 200, "offline API deletion cancels subscriptions", await response.text());
   response = await request(`/apis/${removableApi.slug}`);
-  expectStatus(response.status, 404, "deleted API is removed from catalog", await response.text());
+  const deletedApiHtml = await response.text();
+  assert.ok(response.status === 200 || response.status === 404, `deleted API detail returned unexpected status ${response.status}`);
+  assert.match(deletedApiHtml, /<meta name="robots" content="noindex"\s*\/?>/i, "deleted API detail must be marked noindex");
+  assert.match(deletedApiHtml, /404: This page could not be found|This page could not be found/i, "deleted API detail must render the not-found boundary");
+  assert.ok(!deletedApiHtml.includes("Removable API Smoke"), "deleted API content must not remain in the detail page");
+  results.push("deleted API is removed from catalog");
+  console.log("PASS deleted API is removed from catalog");
 
   const providerApi = await createApi(enterpriseCookie, { sourceType: "STATIC_JSON", name: "Provider Review Smoke", slug: `provider-${runId}`, content: JSON.stringify({ provider: true }) });
   result = await jsonRequest("/api/v1/admin/apis", { method: "PATCH", body: { id: providerApi.id, status: "REVIEW" } }, enterpriseCookie);
