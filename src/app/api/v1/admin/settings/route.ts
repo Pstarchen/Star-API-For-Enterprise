@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { methodsOverlap } from "@/lib/api-contracts";
 import { normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
 import { getCurrentUser } from "@/lib/server/auth";
 import { parseHeroDataUrl, parseIconDataUrl } from "@/lib/server/branding";
@@ -116,22 +117,21 @@ export async function PATCH(request: Request) {
         ]));
         const routes = await transaction.endpoint.findMany({
           where: { publicHost: { in: defaultHosts } },
-          select: { id: true, publicPath: true, routeVersion: true, method: true },
+          select: { id: true, publicPath: true, routeVersion: true, methods: true },
         });
         const routeIds = new Set(routes.map((route) => route.id));
         const existingTargetRoutes = await transaction.endpoint.findMany({
           where: { publicHost: nextHost },
-          select: { id: true, publicPath: true, routeVersion: true, method: true },
+          select: { id: true, publicPath: true, routeVersion: true, methods: true },
         });
-        const targetKeys = new Set<string>();
+        const targetRoutes: Array<{ publicPath: string; routeVersion: string; methods: string[] }> = [];
         for (const route of existingTargetRoutes) {
-          if (!routeIds.has(route.id)) targetKeys.add(`${nextHost}\u0000${route.publicPath}\u0000${route.routeVersion}\u0000${route.method}`);
+          if (!routeIds.has(route.id)) targetRoutes.push(route);
         }
         for (const route of routes) {
           const publicPath = sameOriginPublicPath(route.publicPath);
-          const key = `${nextHost}\u0000${publicPath}\u0000${route.routeVersion}\u0000${route.method}`;
-          if (targetKeys.has(key)) throw new Error("PUBLIC_HOST_ROUTE_CONFLICT");
-          targetKeys.add(key);
+          if (targetRoutes.some((target) => target.publicPath === publicPath && target.routeVersion === route.routeVersion && methodsOverlap(target.methods, route.methods))) throw new Error("PUBLIC_HOST_ROUTE_CONFLICT");
+          targetRoutes.push({ publicPath, routeVersion: route.routeVersion, methods: route.methods });
         }
         for (const route of routes) {
           await transaction.endpoint.update({

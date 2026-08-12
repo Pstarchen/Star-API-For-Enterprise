@@ -4,6 +4,7 @@ import { createDecipheriv, createSign, createVerify, randomBytes, sign } from "n
 import { Prisma } from "@prisma/client";
 import { queueLowBalanceAlert, queueTenantEventEmail } from "@/lib/server/email-delivery";
 import { prisma } from "@/lib/server/prisma";
+import { lockPaymentOrder, lockTenantBalance } from "@/lib/server/wallet-ledger";
 
 export function paymentOrderNo() {
   const stamp = new Date().toISOString().replace(/\D/g, "").slice(0, 14);
@@ -65,6 +66,7 @@ export async function completePayment(
   context: { actorId?: string; ipAddress?: string | null; note?: string } = {},
 ) {
   const result = await prisma.$transaction(async (transaction) => {
+    if (!(await lockPaymentOrder(transaction, orderNo))) throw new Error("PAYMENT_MISMATCH");
     const order = await transaction.paymentOrder.findUnique({ where: { orderNo }, include: { invoice: true, walletEntries: { select: { id: true, balanceAfter: true } } } });
     if (!order || order.amount.comparedTo(amount) !== 0) throw new Error("PAYMENT_MISMATCH");
     if (order.status === "PAID") {
@@ -84,11 +86,10 @@ export async function completePayment(
       if (!order.invoice || order.invoice.status !== "ISSUED") throw new Error("PAYMENT_NOT_PAYABLE");
       await transaction.invoice.update({ where: { id: order.invoice.id }, data: { status: "PAID" } });
     } else {
-      const tenant = await transaction.tenant.update({
-        where: { id: order.tenantId },
-        data: { balance: { increment: order.amount } },
-        select: { balance: true },
-      });
+      const currentTenant = await lockTenantBalance(transaction, order.tenantId);
+      if (!currentTenant) throw new Error("TENANT_NOT_FOUND");
+      const balance = currentTenant.balance.add(order.amount);
+      const tenant = await transaction.tenant.update({ where: { id: order.tenantId }, data: { balance }, select: { balance: true } });
       const entry = await transaction.walletEntry.create({
         data: {
           tenantId: order.tenantId,
@@ -103,7 +104,7 @@ export async function completePayment(
     }
     await transaction.auditLog.create({ data: { tenantId: order.tenantId, actorId: context.actorId, action: "payment.completed", resource: "payment-order", resourceId: order.id, metadata: { orderNo, channel: order.channel, externalTradeNo, ...(context.note ? { note: context.note } : {}) }, ipAddress: context.ipAddress } });
     return { order: updated, notification };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
   if (result.notification) {
     queueTenantEventEmail({
       tenantId: result.notification.tenantId,
@@ -126,7 +127,7 @@ export async function adjustWalletBalance(input: {
   if (input.amount.lte(0)) throw new Error("WALLET_AMOUNT_INVALID");
   const delta = input.type === "ADMIN_RECHARGE" ? input.amount : input.amount.negated();
   const result = await prisma.$transaction(async (transaction) => {
-    const tenant = await transaction.tenant.findUnique({ where: { id: input.tenantId }, select: { id: true, balance: true } });
+    const tenant = await lockTenantBalance(transaction, input.tenantId);
     if (!tenant) throw new Error("TENANT_NOT_FOUND");
     const nextBalance = tenant.balance.add(delta);
     if (nextBalance.lt(0)) throw new Error("WALLET_INSUFFICIENT_BALANCE");
@@ -153,7 +154,7 @@ export async function adjustWalletBalance(input: {
       },
     });
     return { entry, balance: updatedTenant.balance, previousBalance: tenant.balance };
-  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  });
   if (input.type === "ADMIN_RECHARGE") {
     queueTenantEventEmail({
       tenantId: input.tenantId,

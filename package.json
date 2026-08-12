@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:stress": "node scripts/stress-e2e.mjs",
     "install:token": "node scripts/show-install-token-docker.mjs",
     "install:token:host": "node --env-file=.env.production.local scripts/show-install-token.mjs",
     "deploy:baota:init": "bash deploy/baota/init-environment.sh",
@@ -31,6 +32,7 @@
     "@radix-ui/react-tooltip": "^1.2.16",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "csv-parse": "^6.2.1",
     "fflate": "^0.8.3",
     "lucide-react": "^1.28.0",
     "next": "16.3.0",

@@ -1,5 +1,6 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
 import { hashAuthIdentifier } from "@/lib/server/auth";
 import { prisma } from "@/lib/server/prisma";
 
@@ -23,27 +24,7 @@ export async function checkLoginThrottle(email: string, ipAddress: string | null
 }
 
 export async function recordFailedLogin(email: string, ipAddress: string | null) {
-  const key = keyFor(email, ipAddress);
-  const now = new Date();
-  const record = await prisma.authThrottle.findUnique({ where: { key } });
-
-  if (!record || now.getTime() - record.windowStartedAt.getTime() >= WINDOW_MS) {
-    await prisma.authThrottle.upsert({
-      where: { key },
-      create: { key, attempts: 1, windowStartedAt: now },
-      update: { attempts: 1, windowStartedAt: now, blockedUntil: null },
-    });
-    return;
-  }
-
-  const attempts = record.attempts + 1;
-  await prisma.authThrottle.update({
-    where: { key },
-    data: {
-      attempts,
-      blockedUntil: attempts >= MAX_ATTEMPTS ? new Date(now.getTime() + WINDOW_MS) : null,
-    },
-  });
+  await recordThrottleAttempt(keyFor(email, ipAddress), MAX_ATTEMPTS);
 }
 
 export async function clearLoginThrottle(email: string, ipAddress: string | null) {
@@ -56,13 +37,30 @@ export async function checkEmailVerificationThrottle(email: string, ipAddress: s
 }
 
 export async function recordEmailVerificationRequest(email: string, ipAddress: string | null) {
-  const key = emailVerificationKey(email, ipAddress);
+  await recordThrottleAttempt(emailVerificationKey(email, ipAddress), EMAIL_MAX_ATTEMPTS);
+}
+
+async function recordThrottleAttempt(key: string, maximumAttempts: number) {
   const now = new Date();
-  const record = await prisma.authThrottle.findUnique({ where: { key } });
-  if (!record || now.getTime() - record.windowStartedAt.getTime() >= WINDOW_MS) {
-    await prisma.authThrottle.upsert({ where: { key }, create: { key, attempts: 1, windowStartedAt: now }, update: { attempts: 1, windowStartedAt: now, blockedUntil: null } });
-    return;
-  }
-  const attempts = record.attempts + 1;
-  await prisma.authThrottle.update({ where: { key }, data: { attempts, blockedUntil: attempts >= EMAIL_MAX_ATTEMPTS ? new Date(now.getTime() + WINDOW_MS) : null } });
+  const cutoff = new Date(now.getTime() - WINDOW_MS);
+  const blockedUntil = new Date(now.getTime() + WINDOW_MS);
+  await prisma.$executeRaw(Prisma.sql`
+    INSERT INTO "AuthThrottle" ("key", "attempts", "windowStartedAt", "blockedUntil", "updatedAt")
+    VALUES (${key}, 1, ${now}, NULL, ${now})
+    ON CONFLICT ("key") DO UPDATE SET
+      "attempts" = CASE
+        WHEN "AuthThrottle"."windowStartedAt" <= ${cutoff} THEN 1
+        ELSE "AuthThrottle"."attempts" + 1
+      END,
+      "windowStartedAt" = CASE
+        WHEN "AuthThrottle"."windowStartedAt" <= ${cutoff} THEN ${now}
+        ELSE "AuthThrottle"."windowStartedAt"
+      END,
+      "blockedUntil" = CASE
+        WHEN "AuthThrottle"."windowStartedAt" <= ${cutoff} THEN NULL
+        WHEN "AuthThrottle"."attempts" + 1 >= ${maximumAttempts} THEN ${blockedUntil}
+        ELSE NULL
+      END,
+      "updatedAt" = ${now}
+  `);
 }

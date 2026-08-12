@@ -1,11 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { apiDataTypes, apiHttpMethods, apiParameterLocations, apiResponseFormats, generateResponseExample, normalizeMethods } from "@/lib/api-contracts";
 import { apiSlugFromName, normalizePublicHost, normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId, type ContentHandlerId } from "@/lib/internal-handlers";
 import { requireEnabledApiCategory } from "@/lib/server/api-categories";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
-import { assetErrorMessage, prepareApiAssets, preparePhpPackage, type PreparedAsset } from "@/lib/server/api-assets";
+import { assetErrorMessage, inferPreparedDatasetContract, prepareApiAssets, preparedContentResponseExample, preparePhpPackage, type PreparedAsset } from "@/lib/server/api-assets";
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { getPlatformConfig } from "@/lib/server/installation";
@@ -15,9 +16,8 @@ import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream, checkUpstreamHealth } from "@/lib/server/upstream";
 
-const methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "ALL"] as const;
 const handlerIds = internalHandlerTemplates.map((item) => item.id) as [string, ...string[]];
-const sourceTypes = ["RANDOM_IMAGE", "RANDOM_VIDEO", "RANDOM_TEXT", "STATIC_JSON", "PHP_PACKAGE", "EXTERNAL", "SERVER_LOCAL", "TUNNEL", "BUILTIN"] as const;
+const sourceTypes = ["RANDOM_IMAGE", "RANDOM_VIDEO", "RANDOM_TEXT", "STATIC_JSON", "DATASET", "PHP_PACKAGE", "EXTERNAL", "SERVER_LOCAL", "TUNNEL", "BUILTIN"] as const;
 
 const optionalText = (maximum: number) => z.string().trim().max(maximum).optional().default("");
 const createSchema = z.object({
@@ -37,7 +37,7 @@ const createSchema = z.object({
   publicHost: z.string().trim().toLowerCase().min(1).max(253).regex(/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/, "对外域名格式不正确").transform(normalizePublicHost),
   publicPath: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/, "公开路径必须以 / 开头且不能包含查询参数").transform(normalizePublicPath),
   visibility: z.enum(["PUBLIC", "PRIVATE", "GRAY", "INTERNAL"]).default("PUBLIC"),
-  method: z.enum(methods).optional().default("GET"),
+  methods: z.array(z.enum(apiHttpMethods)).min(1).max(apiHttpMethods.length).transform(normalizeMethods).default(["GET"]),
   path: z.string().trim().max(180).regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%{}-]+\/?)*$/, "路径必须以 / 开头且不能包含查询参数").transform(normalizePublicPath).optional().default("/"),
   requestFormat: z.enum(["JSON", "FORM", "BINARY", "ANY"]).default("JSON"),
   summary: optionalText(160),
@@ -65,18 +65,28 @@ const createSchema = z.object({
   sla: z.coerce.number().min(0).max(100).default(99.9),
   content: z.string().max(2_000_000).optional().default(""),
   entryFile: optionalText(180),
+  parameters: z.array(z.object({ location: z.enum(apiParameterLocations), name: z.string().trim().min(1).max(80), upstreamName: optionalText(160), required: z.boolean(), dataType: z.enum(apiDataTypes), defaultValue: optionalText(500), description: optionalText(1000), pattern: optionalText(300), sensitive: z.boolean() }).strict()).max(200).default([]),
+  responseParameters: z.array(z.object({ name: z.string().trim().min(1).max(120), dataType: z.enum(apiDataTypes), description: optionalText(1000) }).strict()).max(200).default([]),
+  responseFormats: z.array(z.enum(apiResponseFormats)).min(1).max(apiResponseFormats.length).default(["JSON"]),
+  dataset: z.object({ grouping: z.enum(["FILE", "MERGED"]).default("MERGED"), contractMode: z.enum(["AUTO", "MANUAL"]).optional(), categoryParameter: optionalText(80), formatParameter: optionalText(80), menuValue: optionalText(80), defaultFormat: z.enum(["TXT", "JSON"]).default("JSON"), textField: optionalText(160), itemsPath: optionalText(160) }).strict().optional(),
 }).strict().superRefine((value, context) => {
   if (value.sourceType === "BUILTIN") {
     const template = internalHandlerTemplates.find((item) => item.id === value.internalHandler);
     if (!template) context.addIssue({ code: "custom", path: ["internalHandler"], message: "请选择内置工具" });
-    else if (!(template.methods as readonly string[]).includes(value.method)) context.addIssue({ code: "custom", path: ["method"], message: "该工具不支持所选请求方法" });
+    else if (value.methods.some((method) => method === "ALL" || !(template.methods as readonly string[]).includes(method))) context.addIssue({ code: "custom", path: ["methods"], message: "该工具不支持所选请求方法" });
   }
   if (["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(value.sourceType) && !value.upstreamBaseUrl) context.addIssue({ code: "custom", path: ["upstreamBaseUrl"], message: "请填写上游服务地址" });
-  if (value.sourceType !== "PHP_PACKAGE" && value.method === "ALL") context.addIssue({ code: "custom", path: ["method"], message: "仅 PHP 程序包支持全部请求方法" });
+  if (value.sourceType !== "PHP_PACKAGE" && value.methods.includes("ALL")) context.addIssue({ code: "custom", path: ["methods"], message: "仅 PHP 程序包支持全部请求方法" });
   if (["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(value.sourceType) && value.upstreamAuthType === "BEARER" && !value.upstreamToken) context.addIssue({ code: "custom", path: ["upstreamToken"], message: "请填写 Bearer Token" });
   if (["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(value.sourceType) && value.upstreamAuthType === "HEADER" && (!value.upstreamHeaderName || !value.upstreamHeaderValue)) context.addIssue({ code: "custom", path: ["upstreamHeaderName"], message: "请填写鉴权请求头名称和值" });
   if (value.rewriteMode === "PREFIX" && !value.upstreamPrefix) context.addIssue({ code: "custom", path: ["upstreamPrefix"], message: "前缀重写需要填写上游路径前缀" });
   if (value.billingMode === "PER_REQUEST" && value.unitPrice <= 0) context.addIssue({ code: "custom", path: ["unitPrice"], message: "收费 API 的单价必须大于 0" });
+  if (value.sourceType === "DATASET") {
+    if (value.responseFormats.some((format) => format === "BINARY")) context.addIssue({ code: "custom", path: ["responseFormats"], message: "通用数据源仅支持 TXT 和 JSON 响应" });
+    const defaultFormat = value.dataset?.defaultFormat ?? (value.responseFormats.includes("JSON") ? "JSON" : "TXT");
+    if (!value.responseFormats.includes(defaultFormat)) context.addIssue({ code: "custom", path: ["dataset", "defaultFormat"], message: "默认返回格式必须包含在已启用的返回格式中" });
+    if (value.dataset?.menuValue && !value.dataset.categoryParameter) context.addIssue({ code: "custom", path: ["dataset", "menuValue"], message: "启用分类列表触发值前需要填写分类参数名" });
+  }
 });
 
 const statusSchema = z.object({ id: z.string().min(1), status: z.enum(["DRAFT", "REVIEW", "GRAY", "PUBLISHED", "DEPRECATED", "OFFLINE"]) }).strict();
@@ -95,6 +105,7 @@ function contentHandler(sourceType: typeof sourceTypes[number]): ContentHandlerI
   if (sourceType === "RANDOM_VIDEO") return "content.random-video";
   if (sourceType === "RANDOM_TEXT") return "content.random-text";
   if (sourceType === "STATIC_JSON") return "content.static-json";
+  if (sourceType === "DATASET") return "content.dataset";
   return null;
 }
 
@@ -103,6 +114,7 @@ function endpointSchema(sourceType: typeof sourceTypes[number]) {
   if (sourceType === "RANDOM_VIDEO") return { type: "string", format: "binary", contentType: "video/*", supportsRanges: true };
   if (sourceType === "RANDOM_TEXT") return { type: "string", contentType: "text/plain; charset=utf-8" };
   if (sourceType === "STATIC_JSON") return { type: "object", contentType: "application/json; charset=utf-8" };
+  if (sourceType === "DATASET") return { type: "object", contentType: ["text/plain; charset=utf-8", "application/json; charset=utf-8"], description: "通用数据源随机响应" };
   if (sourceType === "PHP_PACKAGE") return { type: "object", description: "PHP 程序包动态响应" };
   return { type: "object", properties: {} };
 }
@@ -133,7 +145,7 @@ async function requestInput(request: Request) {
     publicHost: publicHostFromUrl(platform.publicUrl, process.env.API_PUBLIC_HOST ?? "localhost"),
     version: "v1",
     visibility: "PUBLIC",
-    method: "GET",
+    methods: supplied.sourceType === "DATASET" ? ["GET", "POST"] : ["GET"],
     requestFormat: "JSON",
     corsEnabled: true,
     forceHttps: platform.publicUrl.startsWith("https://"),
@@ -160,10 +172,10 @@ export async function POST(request: Request) {
   const input = payload.parsed.data;
   if (!auth.isAdmin && input.sourceType === "SERVER_LOCAL") return Response.json({ code: 403, message: "服务器内网服务仅平台管理员可以配置；服务商可使用公网或临时穿透上游" }, { status: 403, headers: noStoreHeaders });
   const handler = contentHandler(input.sourceType);
-  const effectiveMethod = handler ? "GET" : input.method;
+  const effectiveMethods = input.methods;
   const [slugConflict, routeConflict] = await Promise.all([
     findSlugConflict(input.slug),
-    findRouteConflict({ publicHost: input.publicHost, publicPath: input.publicPath, routeVersion: input.version || "v1", method: effectiveMethod }),
+    findRouteConflict({ publicHost: input.publicHost, publicPath: input.publicPath, routeVersion: input.version || "v1", methods: effectiveMethods }),
   ]);
   if (slugConflict) return Response.json({ code: 409, message: `API 唯一标识已被“${slugConflict.name}”使用` }, { status: 409, headers: noStoreHeaders });
   if (routeConflict) return Response.json({ code: 409, message: `公开路由与“${routeConflict.version.product.name}”冲突` }, { status: 409, headers: noStoreHeaders });
@@ -194,11 +206,22 @@ export async function POST(request: Request) {
   const providerLegalName = input.providerLegalName || providerName;
   const providerEmail = input.providerEmail || auth.user.email;
   const selectedHandler = handler ?? (input.sourceType === "PHP_PACKAGE" ? phpHandlerId : input.sourceType === "BUILTIN" ? input.internalHandler : null);
-  const method = effectiveMethod;
+  const methods = effectiveMethods;
   const version = input.version || "v1";
   const shortName = input.shortName || Array.from(input.name).slice(0, 4).join("");
   const networkSource = ["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(input.sourceType);
   const upstreamType = input.sourceType === "EXTERNAL" ? "PUBLIC_API" : input.sourceType === "SERVER_LOCAL" ? "SERVER_LOCAL" : input.sourceType === "TUNNEL" ? "TUNNEL" : input.sourceType === "PHP_PACKAGE" ? "PHP_PACKAGE" : input.sourceType === "BUILTIN" ? "BUILTIN" : "CONTENT";
+  const datasetConfig = input.sourceType === "DATASET" ? {
+    ...(input.dataset ?? { grouping: "FILE", categoryParameter: "category", formatParameter: "format", menuValue: "list", defaultFormat: input.responseFormats.includes("JSON") ? "JSON" : "TXT", textField: "", itemsPath: "" }),
+    contractMode: input.dataset?.contractMode ?? (input.parameters.length || input.responseParameters.length ? "MANUAL" : "AUTO"),
+  } : null;
+  const executionConfig = { sourceType: input.sourceType, ...(input.sourceType === "PHP_PACKAGE" ? { entryFile: phpEntryFile } : {}), ...(datasetConfig ? { dataset: datasetConfig } : {}) };
+  const contentSample = handler ? preparedContentResponseExample(handler, assets, executionConfig, input.responseFormats) : undefined;
+  if (input.sourceType === "DATASET" && input.dataset?.itemsPath && contentSample === undefined) return Response.json({ code: 400, message: `数据数组路径 ${input.dataset.itemsPath} 在已上传文件中不存在或没有可用内容` }, { status: 400, headers: noStoreHeaders });
+  const inferredContract = input.sourceType === "DATASET" ? inferPreparedDatasetContract(assets, executionConfig) : null;
+  const parameters = input.parameters.length ? input.parameters : inferredContract?.parameters ?? [];
+  const responseParameters = input.responseParameters.length ? input.responseParameters : inferredContract?.responseParameters ?? [];
+  const responseExample = generateResponseExample(responseParameters, input.responseFormats, contentSample);
   const secretConfig = networkSource && input.upstreamAuthType === "BEARER"
     ? { token: input.upstreamToken }
     : networkSource && input.upstreamAuthType === "HEADER" ? { headerName: input.upstreamHeaderName, headerValue: input.upstreamHeaderValue } : {};
@@ -223,14 +246,41 @@ export async function POST(request: Request) {
           visibility: input.visibility,
           sla: input.sla,
           internalHandler: selectedHandler,
-          executionConfig: { sourceType: input.sourceType, ...(input.sourceType === "PHP_PACKAGE" ? { entryFile: phpEntryFile } : {}) },
+          executionConfig,
           billingMode: input.billingMode,
           unitPrice: input.billingMode === "FREE" ? 0 : input.unitPrice,
           freeQuotaMonthly: input.freeQuotaMonthly,
           defaultQpsLimit: input.defaultQpsLimit,
           upstream: { create: { type: upstreamType, rewriteMode: input.rewriteMode, upstreamPrefix: input.upstreamPrefix, healthPath: input.healthPath, timeoutMs: input.timeoutMs, authType: networkSource ? input.upstreamAuthType : "NONE", secretConfigEncrypted: Object.keys(secretConfig).length ? encryptJson(secretConfig) : null, allowPrivateNetwork: input.sourceType === "SERVER_LOCAL", nodes: networkSource ? { create: { name: "主节点", baseUrl: input.upstreamBaseUrl, weight: 100 } } : undefined } },
           assets: assets.length ? { create: assets.map((asset) => ({ ...asset, size: BigInt(asset.size) })) } : undefined,
-          versions: { create: { version, basePath: `https://${input.publicHost}`, endpoints: { create: { method, path: input.path, publicHost: input.publicHost, publicPath: input.publicPath, routeVersion: version, requestFormat: input.requestFormat, summary: input.summary || input.name, schema: endpointSchema(input.sourceType), corsEnabled: input.corsEnabled, forceHttps: input.forceHttps, requestLogging: input.requestLogging, dailyLimit: input.dailyLimit, ipAllowlist: input.ipAllowlist, ipDenylist: input.ipDenylist } } } },
+          versions: {
+            create: {
+              version,
+              basePath: `https://${input.publicHost}`,
+              endpoints: {
+                create: {
+                  methods,
+                  path: input.path,
+                  publicHost: input.publicHost,
+                  publicPath: input.publicPath,
+                  routeVersion: version,
+                  requestFormat: input.requestFormat,
+                  responseFormats: input.responseFormats,
+                  responseExample: responseExample as Prisma.InputJsonValue,
+                  summary: input.summary || input.name,
+                  schema: endpointSchema(input.sourceType),
+                  corsEnabled: input.corsEnabled,
+                  forceHttps: input.forceHttps,
+                  requestLogging: input.requestLogging,
+                  dailyLimit: input.dailyLimit,
+                  ipAllowlist: input.ipAllowlist,
+                  ipDenylist: input.ipDenylist,
+                  parameters: parameters.length ? { create: parameters.map((parameter) => ({ location: parameter.location, name: parameter.name, upstreamName: parameter.upstreamName || null, required: parameter.required, dataType: parameter.dataType, defaultValue: parameter.defaultValue || null, description: parameter.description, validation: parameter.pattern ? { pattern: parameter.pattern } : {}, sensitive: parameter.sensitive })) } : undefined,
+                  responseParameters: responseParameters.length ? { create: responseParameters.map((parameter, sortOrder) => ({ ...parameter, sortOrder })) } : undefined,
+                },
+              },
+            },
+          },
         },
       });
       await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.create", resource: "api-product", resourceId: product.id, metadata: { slug: input.slug, sourceType: input.sourceType, billingMode: input.billingMode, assets: assets.length }, ipAddress: requestIp(request) } });

@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, CheckCircle2, Code2, Copy, CreditCard, ExternalLink, Eye, EyeOff, GitBranch as Github, KeyRound, Landmark, Link2, Loader2, Mail, QrCode, Save, Send, ShieldCheck } from "lucide-react";
-import { type FormEvent, useMemo, useState } from "react";
+import { type FormEvent, useId, useMemo, useState } from "react";
 import { absoluteOAuthUrl, GITHUB_OAUTH_CALLBACK_PATH, GITHUB_OAUTH_SCOPES, OAUTH_FRONTEND_CALLBACK_PATH } from "@/lib/oauth";
 import type { IntegrationKey } from "@/lib/server/integrations";
 import { Badge } from "./ui/badge";
@@ -263,24 +263,25 @@ function IntegrationEditor({ item, definition, publicUrl, onSaved }: { item: Int
 
 function IntegrationField({ field, item, enabled }: { field: FieldSpec; item: IntegrationSummary; enabled: boolean }) {
   const [revealed, setRevealed] = useState(false);
+  const inputId = useId();
   const value = field.secret ? "" : String(item.publicConfig[field.name] ?? "");
   const placeholder = field.secret && item.secretConfigured ? "留空保留当前密钥" : field.placeholder;
   const required = item.key === "github" && enabled && (field.name === "clientId" || (field.name === "clientSecret" && !item.secretConfigured));
   return (
-    <label className={field.multiline ? "block sm:col-span-2" : "block"}>
-      <span className="mb-1.5 block text-[10px] font-semibold">{field.label}</span>
+    <div className={field.multiline ? "block sm:col-span-2" : "block"}>
+      <label htmlFor={inputId} className="mb-1.5 block text-[10px] font-semibold">{field.label}</label>
       {field.multiline ? (
-        <Textarea name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} required={required} className="mono text-[10px]" />
+        <Textarea id={inputId} name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} required={required} className="mono text-[10px]" />
       ) : field.secret ? (
         <div className="relative">
-          <Input name={field.name} type={revealed ? "text" : "password"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="new-password" className="pr-11" />
-          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setRevealed((current) => !current)} className="absolute right-1 top-1" aria-label={revealed ? `隐藏${field.label}` : `显示${field.label}`}>{revealed ? <EyeOff /> : <Eye />}</Button>
+          <Input id={inputId} name={field.name} type={revealed ? "text" : "password"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="new-password" className="pr-11" />
+          <Button type="button" variant="ghost" size="icon" onClick={() => setRevealed((current) => !current)} className="absolute right-0 top-0 size-10" aria-controls={inputId} aria-pressed={revealed} aria-label={revealed ? "隐藏输入内容" : "显示输入内容"} title={revealed ? `隐藏${field.label}` : `显示${field.label}`}>{revealed ? <EyeOff /> : <Eye />}</Button>
         </div>
       ) : (
-        <Input name={field.name} type={field.type ?? "text"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="off" />
+        <Input id={inputId} name={field.name} type={field.type ?? "text"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="off" />
       )}
       {(field.helper || field.secret) && <small className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{field.helper ?? "新值提交后加密保存，页面不会再次显示。"}</small>}
-    </label>
+    </div>
   );
 }
 

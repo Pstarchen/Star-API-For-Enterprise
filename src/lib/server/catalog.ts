@@ -12,7 +12,7 @@ const productInclude = {
   _count: { select: { assets: true } },
   versions: {
     orderBy: { version: "desc" as const },
-    include: { endpoints: { orderBy: [{ path: "asc" as const }, { method: "asc" as const }] } },
+    include: { endpoints: { orderBy: [{ path: "asc" as const }], include: { parameters: { orderBy: { name: "asc" as const } }, responseParameters: { orderBy: { sortOrder: "asc" as const } } } } },
   },
 } satisfies Prisma.ApiProductInclude;
 
@@ -30,7 +30,8 @@ function mapProduct(product: ProductRecord, stats?: ProductCallStatistics): Cata
     categoryId: product.categoryId,
     category: product.category.name,
     description: product.description,
-    method: endpoint?.method ?? "GET",
+    method: endpoint?.methods.join(" / ") ?? "GET",
+    methods: endpoint?.methods ?? ["GET"],
     endpoint: endpoint?.publicPath ?? "/",
     publicHost: endpoint?.publicHost ?? "",
     latency: stats?.averageLatency == null ? null : Math.round(stats.averageLatency),
@@ -57,6 +58,10 @@ function mapProduct(product: ProductRecord, stats?: ProductCallStatistics): Cata
     assetCount: product._count.assets,
     updatedAt: product.updatedAt.toISOString(),
     schema: endpoint?.schema ?? {},
+    requestParameters: endpoint?.parameters ?? [],
+    responseParameters: endpoint?.responseParameters ?? [],
+    responseFormats: endpoint?.responseFormats ?? ["JSON"],
+    responseExample: endpoint?.responseExample ?? null,
   };
 }
 

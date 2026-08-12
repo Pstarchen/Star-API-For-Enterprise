@@ -1,0 +1,9 @@
+services:
+  secrets-init:
+    image: star-api-stress-app:local
+
+  migrate:
+    image: star-api-stress-migrator:local
+
+  app:
+    image: star-api-stress-app:local

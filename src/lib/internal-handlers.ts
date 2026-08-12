@@ -7,7 +7,7 @@ export const internalHandlerTemplates = [
 
 export type InternalHandlerId = (typeof internalHandlerTemplates)[number]["id"];
 
-export const contentHandlerIds = ["content.random-image", "content.random-video", "content.random-text", "content.static-json"] as const;
+export const contentHandlerIds = ["content.random-image", "content.random-video", "content.random-text", "content.static-json", "content.dataset"] as const;
 export type ContentHandlerId = (typeof contentHandlerIds)[number];
 export const phpHandlerId = "runtime.php" as const;
 

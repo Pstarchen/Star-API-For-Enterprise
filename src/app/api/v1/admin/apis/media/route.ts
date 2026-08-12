@@ -1,6 +1,6 @@
-import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
+import { lockApiProduct } from "@/lib/server/api-product-lock";
 import { mediaStorageLimits, removeStoredMedia, storeMediaRequest, type MediaKind } from "@/lib/server/media-storage";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
@@ -63,6 +63,7 @@ export async function POST(request: Request) {
   try {
     stored = await storeMediaRequest({ productId, encodedName, body: request.body, kind, maximumBytes: limits.maxApiBytes - usedBytes });
     const asset = await prisma.$transaction(async (transaction) => {
+      if (!(await lockApiProduct(transaction, productId))) throw new Error("API_NOT_FOUND");
       const [count, size] = await Promise.all([
         transaction.apiAsset.count({ where: { productId, kind } }),
         transaction.apiAsset.aggregate({ where: { productId, kind }, _sum: { size: true } }),
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
       const created = await transaction.apiAsset.create({ data: { productId, kind, name: stored!.name, mimeType: stored!.mimeType, data: Buffer.alloc(0), storageKey: stored!.storageKey, size: stored!.size } });
       await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: `api.${kind.toLowerCase()}.add`, resource: "api-product", resourceId: productId, metadata: { assetId: created.id, name: created.name, bytes: Number(created.size) }, ipAddress: requestIp(request) } });
       return created;
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+    });
     revalidatePath("/", "layout");
     return Response.json({ code: 201, message: `${kind === "VIDEO" ? "视频" : "图片"}“${asset.name}”已上传`, data: { id: asset.id, kind: asset.kind, name: asset.name, mimeType: asset.mimeType, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), preview: null } }, { status: 201, headers: noStoreHeaders });
   } catch (error) {

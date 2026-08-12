@@ -150,19 +150,19 @@ enum EmailDeliveryStatus {
 }
 
 model Tenant {
-  id                String           @id @default(cuid())
+  id                String             @id @default(cuid())
   name              String
-  type              AccountType      @default(ENTERPRISE)
-  creditCode        String?          @unique
-  status            TenantStatus     @default(PENDING)
-  plan              String           @default("basic")
+  type              AccountType        @default(ENTERPRISE)
+  creditCode        String?            @unique
+  status            TenantStatus       @default(PENDING)
+  plan              String             @default("basic")
   notificationEmail String?
-  timezone          String           @default("Asia/Shanghai")
-  quotaAlerts       Boolean          @default(true)
-  balanceAlerts     Boolean          @default(true)
-  balance           Decimal          @default(0) @db.Decimal(14, 6)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  timezone          String             @default("Asia/Shanghai")
+  quotaAlerts       Boolean            @default(true)
+  balanceAlerts     Boolean            @default(true)
+  balance           Decimal            @default(0) @db.Decimal(14, 6)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
   memberships       Membership[]
   apps              Application[]
   invoices          Invoice[]
@@ -405,6 +405,7 @@ model ApiAsset {
   productId  String
   kind       String
   name       String
+  groupKey   String     @default("")
   mimeType   String
   data       Bytes
   storageKey String?    @unique
@@ -413,6 +414,7 @@ model ApiAsset {
   product    ApiProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId, kind, createdAt])
+  @@index([productId, kind, groupKey])
 }
 
 model ApiVersion {
@@ -429,30 +431,34 @@ model ApiVersion {
 }
 
 model Endpoint {
-  id             String            @id @default(cuid())
-  versionId      String
-  method         String
-  path           String
-  publicHost     String
-  publicPath     String
-  routeVersion   String
-  requestFormat  String            @default("JSON")
-  summary        String
-  schema         Json
-  corsEnabled    Boolean           @default(false)
-  forceHttps     Boolean           @default(true)
-  ipAllowlist    String[]
-  ipDenylist     String[]
-  dailyLimit     BigInt            @default(0)
-  requestLogging Boolean           @default(true)
-  version        ApiVersion        @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  requestLogs    RequestLog[]
-  parameters     ApiParameter[]
-  responseRules  ApiResponseRule[]
-  testCases      ApiTestCase[]
+  id                 String                 @id @default(cuid())
+  versionId          String
+  methods            String[]               @default(["GET"])
+  path               String
+  publicHost         String
+  publicPath         String
+  routeVersion       String
+  requestFormat      String                 @default("JSON")
+  responseFormats    String[]               @default(["JSON"])
+  responseExample    Json?
+  summary            String
+  schema             Json
+  corsEnabled        Boolean                @default(false)
+  forceHttps         Boolean                @default(true)
+  ipAllowlist        String[]
+  ipDenylist         String[]
+  dailyLimit         BigInt                 @default(0)
+  requestLogging     Boolean                @default(true)
+  version            ApiVersion             @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  requestLogs        RequestLog[]
+  parameters         ApiParameter[]
+  responseParameters ApiResponseParameter[]
+  responseRules      ApiResponseRule[]
+  testCases          ApiTestCase[]
+  usageCounters      ApiUsageCounter[]
 
-  @@unique([versionId, method, path])
-  @@unique([publicHost, publicPath, routeVersion, method])
+  @@index([versionId, path])
+  @@index([publicHost, publicPath, routeVersion])
   @@index([publicHost, publicPath])
 }
 
@@ -502,11 +508,26 @@ model ApiParameter {
   upstreamName String?
   required     Boolean              @default(false)
   dataType     String               @default("string")
+  description  String               @default("")
+  defaultValue String?
   validation   Json                 @default("{}")
   sensitive    Boolean              @default(false)
   endpoint     Endpoint             @relation(fields: [endpointId], references: [id], onDelete: Cascade)
 
   @@unique([endpointId, location, name])
+}
+
+model ApiResponseParameter {
+  id          String   @id @default(cuid())
+  endpointId  String
+  name        String
+  dataType    String   @default("string")
+  description String   @default("")
+  sortOrder   Int      @default(0)
+  endpoint    Endpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, name])
+  @@index([endpointId, sortOrder])
 }
 
 model ApiResponseRule {
@@ -603,31 +624,48 @@ model Subscription {
   createdAt    DateTime           @default(now())
   app          Application        @relation(fields: [appId], references: [id], onDelete: Cascade)
   product      ApiProduct         @relation(fields: [productId], references: [id])
+  usageCounters ApiUsageCounter[]
 
   @@unique([appId, productId])
 }
 
+model ApiUsageCounter {
+  id             String       @id
+  subscriptionId String
+  endpointId     String?
+  scope          String
+  period         String
+  used           BigInt       @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  endpoint       Endpoint?    @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, scope, period])
+  @@index([endpointId, scope, period])
+}
+
 model RequestLog {
-  id            String      @id
+  id            String       @id
   appId         String
   apiKeyId      String?
   productId     String?
   endpointId    String?
-  method        String      @default("GET")
-  path          String      @default("/")
+  method        String       @default("GET")
+  path          String       @default("/")
   statusCode    Int
   latencyMs     Int
   region        String
-  billableUnits BigInt      @default(0)
-  amount        Decimal     @default(0) @db.Decimal(14, 6)
-  responseBytes BigInt      @default(0)
+  billableUnits BigInt       @default(0)
+  amount        Decimal      @default(0) @db.Decimal(14, 6)
+  responseBytes BigInt       @default(0)
   errorCode     String?
-  billed        Boolean     @default(false)
-  occurredAt    DateTime    @default(now())
-  app           Application @relation(fields: [appId], references: [id], onDelete: Cascade)
-  apiKey        ApiKey?     @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
-  product       ApiProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
-  endpoint      Endpoint?   @relation(fields: [endpointId], references: [id], onDelete: SetNull)
+  billed        Boolean      @default(false)
+  occurredAt    DateTime     @default(now())
+  app           Application  @relation(fields: [appId], references: [id], onDelete: Cascade)
+  apiKey        ApiKey?      @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  product       ApiProduct?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  endpoint      Endpoint?    @relation(fields: [endpointId], references: [id], onDelete: SetNull)
   walletEntry   WalletEntry?
 
   @@index([appId, occurredAt(sort: Desc)])

@@ -1,6 +1,9 @@
+import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
+import { generateResponseExample } from "@/lib/api-contracts";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
-import { assetErrorMessage, MAX_TOTAL_ASSET_BYTES, prepareApiAssets, preparePhpPackage } from "@/lib/server/api-assets";
+import { assetErrorMessage, inferPreparedDatasetContract, MAX_TOTAL_ASSET_BYTES, prepareApiAssets, preparedContentResponseExample, preparePhpPackage } from "@/lib/server/api-assets";
+import { lockApiProduct } from "@/lib/server/api-product-lock";
 import { isAssetBackedHandler, isContentHandler, phpHandlerId } from "@/lib/internal-handlers";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
@@ -49,7 +52,7 @@ export async function POST(request: Request) {
   const content = String(form.get("content") ?? "");
   const entryFile = String(form.get("entryFile") ?? "index.php");
   const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
-  const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, slug: true, internalHandler: true, executionConfig: true, provider: { select: { ownerTenantId: true } }, _count: { select: { assets: true } } } });
+  const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, slug: true, internalHandler: true, executionConfig: true, provider: { select: { ownerTenantId: true } }, versions: { orderBy: { version: "desc" }, take: 1, select: { endpoints: { take: 1, select: { id: true, responseFormats: true, responseParameters: { orderBy: { sortOrder: "asc" }, select: { name: true, dataType: true, description: true } } } } } }, _count: { select: { assets: true } } } });
   if (!product || !isAssetBackedHandler(product.internalHandler)) return Response.json({ code: 404, message: "可管理内容的 API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
   if (["content.random-image", "content.random-video"].includes(product.internalHandler ?? "")) return Response.json({ code: 409, message: "图片和视频请使用流式上传入口" }, { status: 409, headers: noStoreHeaders });
@@ -64,21 +67,42 @@ export async function POST(request: Request) {
     else throw new Error("ASSETS_REQUIRED");
   }
   catch (error) { return Response.json({ code: 400, message: assetErrorMessage(error) ?? "上传内容无法处理" }, { status: 400, headers: noStoreHeaders }); }
-  const replaceAll = product.internalHandler === "content.static-json" || product.internalHandler === phpHandlerId;
+  const replaceAll = ["content.static-json", "content.dataset", phpHandlerId].includes(product.internalHandler ?? "");
   if (!replaceAll && product._count.assets + assets.length > 1000) return Response.json({ code: 409, message: "单个 API 最多保存 1000 项内容" }, { status: 409, headers: noStoreHeaders });
   const currentSize = await prisma.apiAsset.aggregate({ where: { productId }, _sum: { size: true } });
   if (!replaceAll && Number(currentSize._sum.size ?? 0) + assets.reduce((sum, item) => sum + item.size, 0) > MAX_TOTAL_ASSET_BYTES) return Response.json({ code: 409, message: "单个 API 的内容总大小不能超过 64 MB" }, { status: 409, headers: noStoreHeaders });
+  const endpoint = product.versions[0]?.endpoints[0];
+  const contentSample = endpoint && isContentHandler(product.internalHandler) ? preparedContentResponseExample(product.internalHandler, assets, product.executionConfig, endpoint.responseFormats) : undefined;
+  const executionConfig = product.executionConfig && typeof product.executionConfig === "object" && !Array.isArray(product.executionConfig) ? product.executionConfig as Record<string, unknown> : {};
+  const datasetConfig = executionConfig.dataset && typeof executionConfig.dataset === "object" && !Array.isArray(executionConfig.dataset) ? executionConfig.dataset as Record<string, unknown> : {};
+  const itemsPath = typeof datasetConfig.itemsPath === "string" ? datasetConfig.itemsPath.trim() : "";
+  if (product.internalHandler === "content.dataset" && itemsPath && contentSample === undefined) return Response.json({ code: 400, message: `新文件中不存在已配置的数据数组路径 ${itemsPath}，原内容已保留` }, { status: 400, headers: noStoreHeaders });
+  const inferredContract = product.internalHandler === "content.dataset" && datasetConfig.contractMode === "AUTO" ? inferPreparedDatasetContract(assets, product.executionConfig) : null;
+  const responseParameters = inferredContract?.responseParameters ?? endpoint?.responseParameters ?? [];
+  const responseExample = endpoint && isContentHandler(product.internalHandler)
+    ? generateResponseExample(responseParameters, endpoint.responseFormats, contentSample)
+    : undefined;
   await prisma.$transaction(async (transaction) => {
-    if (replaceAll) await transaction.apiAsset.deleteMany({ where: { productId } });
+    if (replaceAll) {
+      if (!(await lockApiProduct(transaction, productId))) throw new Error("API_NOT_FOUND");
+      await transaction.apiAsset.deleteMany({ where: { productId } });
+    }
     await transaction.apiAsset.createMany({ data: assets.map((asset) => ({ ...asset, productId, size: BigInt(asset.size) })) });
     if (product.internalHandler === phpHandlerId) {
       const config = product.executionConfig && typeof product.executionConfig === "object" && !Array.isArray(product.executionConfig) ? product.executionConfig as Record<string, unknown> : {};
       await transaction.apiProduct.update({ where: { id: product.id }, data: { executionConfig: { ...config, entryFile: normalizedEntry } } });
     }
+    if (endpoint && responseExample !== undefined) await transaction.endpoint.update({ where: { id: endpoint.id }, data: { responseExample: responseExample as Prisma.InputJsonValue } });
+    if (endpoint && inferredContract) {
+      await transaction.apiParameter.deleteMany({ where: { endpointId: endpoint.id } });
+      if (inferredContract.parameters.length) await transaction.apiParameter.createMany({ data: inferredContract.parameters.map((parameter) => ({ endpointId: endpoint.id, location: parameter.location, name: parameter.name, upstreamName: parameter.upstreamName || null, required: parameter.required, dataType: parameter.dataType, defaultValue: parameter.defaultValue || null, description: parameter.description, validation: parameter.pattern ? { pattern: parameter.pattern } : {}, sensitive: parameter.sensitive })) });
+      await transaction.apiResponseParameter.deleteMany({ where: { endpointId: endpoint.id } });
+      if (inferredContract.responseParameters.length) await transaction.apiResponseParameter.createMany({ data: inferredContract.responseParameters.map((parameter, sortOrder) => ({ endpointId: endpoint.id, ...parameter, sortOrder })) });
+    }
     await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: replaceAll ? "api.content.replace" : "api.content.add", resource: "api-product", resourceId: product.id, metadata: { count: assets.length, bytes: assets.reduce((sum, item) => sum + item.size, 0), ...(product.internalHandler === phpHandlerId ? { entryFile: normalizedEntry } : {}) }, ipAddress: requestIp(request) } });
   });
   revalidatePath("/", "layout");
-  return Response.json({ code: 201, message: product.internalHandler === phpHandlerId ? "PHP 程序包已部署" : product.internalHandler === "content.static-json" ? "JSON 响应已更新" : `已添加 ${assets.length} 项内容` }, { status: 201, headers: noStoreHeaders });
+  return Response.json({ code: 201, message: product.internalHandler === phpHandlerId ? "PHP 程序包已部署" : product.internalHandler === "content.static-json" ? "JSON 响应已更新" : product.internalHandler === "content.dataset" ? `通用数据源已替换，共 ${assets.length} 个文件` : `已添加 ${assets.length} 项内容` }, { status: 201, headers: noStoreHeaders });
 }
 
 export async function DELETE(request: Request) {

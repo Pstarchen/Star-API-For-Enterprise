@@ -53,10 +53,12 @@ export async function PATCH(request: Request) {
   if (!parsed.success) return Response.json({ code: 400, message: "密钥参数不正确" }, { status: 400, headers: noStoreHeaders });
   const key = await prisma.apiKey.findFirst({ where: { id: parsed.data.id, app: { tenant: { memberships: { some: { userId: user.id } } } } }, include: { app: true } });
   if (!key) return Response.json({ code: 404, message: "密钥不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
-  if (key.status !== "ACTIVE") return Response.json({ code: 409, message: "密钥已经失效" }, { status: 409, headers: noStoreHeaders });
-  await prisma.$transaction([
-    prisma.apiKey.update({ where: { id: key.id }, data: { status: "REVOKED" } }),
-    prisma.auditLog.create({ data: { tenantId: key.app.tenantId, actorId: user.id, action: "api-key.revoke", resource: "api-key", resourceId: key.id, metadata: { prefix: key.prefix } } }),
-  ]);
+  const revoked = await prisma.$transaction(async (transaction) => {
+    const result = await transaction.apiKey.updateMany({ where: { id: key.id, status: "ACTIVE" }, data: { status: "REVOKED" } });
+    if (result.count === 0) return false;
+    await transaction.auditLog.create({ data: { tenantId: key.app.tenantId, actorId: user.id, action: "api-key.revoke", resource: "api-key", resourceId: key.id, metadata: { prefix: key.prefix } } });
+    return true;
+  });
+  if (!revoked) return Response.json({ code: 409, message: "密钥已经失效" }, { status: 409, headers: noStoreHeaders });
   return Response.json({ code: 200, message: "密钥已撤销" }, { headers: noStoreHeaders });
 }

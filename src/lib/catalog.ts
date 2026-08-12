@@ -16,6 +16,7 @@ export type CatalogProduct = {
   category: string;
   description: string;
   method: string;
+  methods: string[];
   endpoint: string;
   publicHost: string;
   latency: number | null;
@@ -42,6 +43,10 @@ export type CatalogProduct = {
   assetCount: number;
   updatedAt: string;
   schema: unknown;
+  requestParameters: Array<{ id: string; location: "PATH" | "QUERY" | "BODY"; name: string; upstreamName: string | null; required: boolean; dataType: string; description: string; defaultValue: string | null; validation: unknown; sensitive: boolean }>;
+  responseParameters: Array<{ id: string; name: string; dataType: string; description: string; sortOrder: number }>;
+  responseFormats: string[];
+  responseExample: unknown;
 };
 
 export function formatPrice(billingMode: CatalogProduct["billingMode"], unitPrice: string, freeQuotaMonthly: string) {

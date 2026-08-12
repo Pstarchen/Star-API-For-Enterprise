@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertTriangle, Check, Copy, KeyRound, Loader2, Pause, Play, Plus, ShieldX, Trash2 } from "lucide-react";
+import { Check, Copy, KeyRound, Loader2, Pause, Play, Plus, ShieldX, Trash2 } from "lucide-react";
 import { type FormEvent, type ReactNode, useState } from "react";
 import type { ApplicationView } from "@/lib/applications";
 import type { CatalogProduct } from "@/lib/catalog";
 import { Button } from "./ui/button";
-import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
+import { ConfirmDialog } from "./ui/confirm-dialog";
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "./ui/select";
 
 type ConfirmTarget =
@@ -215,7 +216,7 @@ export function AppsManager({ initialApps, products, context = "developer" }: { 
           <section>
             <div className="flex items-center justify-between">
               <h4 className="text-[10px] font-bold">API 密钥</h4>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[9px] text-[var(--brand)]" onClick={() => { setActionApp(app); setAction("key"); setError(""); }}>新增密钥</Button>
+              <Button variant="ghost" size="sm" className="h-10 px-3 text-[10px] text-[var(--brand)] sm:h-9" onClick={() => { setActionApp(app); setAction("key"); setError(""); }}>新增密钥</Button>
             </div>
             <div className="mt-2 space-y-2">
               {app.keys.map((key) => <div key={key.id} className="flex items-center gap-2 rounded-[var(--radius-control)] bg-[var(--surface-subtle)] p-2.5">
@@ -230,12 +231,12 @@ export function AppsManager({ initialApps, products, context = "developer" }: { 
           <section>
             <div className="flex items-center justify-between">
               <h4 className="text-[10px] font-bold">API 订阅</h4>
-              <Button variant="ghost" size="sm" className="h-7 px-2 text-[9px] text-[var(--brand)]" onClick={() => { setActionApp(app); setAction("subscribe"); setError(""); }}>订阅 API</Button>
+              <Button variant="ghost" size="sm" className="h-10 px-3 text-[10px] text-[var(--brand)] sm:h-9" onClick={() => { setActionApp(app); setAction("subscribe"); setError(""); }}>订阅 API</Button>
             </div>
             <div className="mt-2 space-y-2">
               {app.subscriptions.filter((item) => item.status === "ACTIVE").map((item) => <div key={item.id} className="flex items-center gap-2 rounded-[var(--radius-control)] bg-[var(--surface-subtle)] p-2.5">
-                <div className="min-w-0 flex-1"><strong className="block truncate text-[9px]">{item.productName}</strong><span className="text-[8px] text-[var(--muted)]">{item.qpsLimit} QPS · ¥{item.unitPrice}/次</span></div>
-                <Button variant="ghost" size="sm" className="h-7 px-2 text-[9px] text-[var(--danger)]" onClick={() => requestConfirmation({ type: "subscription", app, subscription: item })}><Trash2 />取消</Button>
+                <div className="min-w-0 flex-1"><strong className="block truncate text-[9px]">{item.productName}</strong><span className="mt-0.5 block text-[8px] leading-4 text-[var(--muted)]">{item.qpsLimit} QPS · {BigInt(item.quotaMonthly) > BigInt(0) ? `本月配额 ${BigInt(item.quotaMonthly).toLocaleString("zh-CN")} 次` : "月配额不限"}<br />¥{item.unitPrice}/次</span></div>
+                <Button variant="ghost" size="sm" className="h-10 px-3 text-[10px] text-[var(--danger)] sm:h-9" onClick={() => requestConfirmation({ type: "subscription", app, subscription: item })}><Trash2 />取消</Button>
               </div>)}
               {!app.subscriptions.some((item) => item.status === "ACTIVE") && <p className="py-3 text-[9px] text-[var(--muted)]">尚未订阅 API</p>}
             </div>
@@ -243,7 +244,7 @@ export function AppsManager({ initialApps, products, context = "developer" }: { 
         </div>
 
         <div className="flex justify-end gap-2 border-t border-[var(--line)] px-5 py-3">
-          <Button variant="secondary" size="sm" onClick={() => toggle(app)}>{app.status === "active" ? <Pause /> : <Play />}{app.status === "active" ? "暂停" : "恢复"}</Button>
+          <Button variant="secondary" size="sm" className="h-10 sm:h-9" onClick={() => toggle(app)}>{app.status === "active" ? <Pause /> : <Play />}{app.status === "active" ? "暂停" : "恢复"}</Button>
           <Button variant="secondary" size="icon-sm" className="text-[var(--danger)]" onClick={() => requestConfirmation({ type: "app", app })} aria-label={`删除应用 ${app.name}`}><Trash2 /></Button>
         </div>
       </article>)}
@@ -277,26 +278,7 @@ export function AppsManager({ initialApps, products, context = "developer" }: { 
       <Button onClick={copySecret} className="mt-4 w-full">{copied ? <Check /> : <Copy />}{copied ? "已复制" : "复制密钥"}</Button>
     </Modal>}
 
-    <Dialog open={Boolean(confirmTarget)} onOpenChange={(open) => { if (!open && !confirming) setConfirmTarget(null); }}>
-      <DialogContent className="max-w-[460px] p-0" showClose={!confirming}>
-        {confirmation && <>
-          <DialogHeader>
-            <div className="flex items-start gap-3 pr-5">
-              <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--danger-soft)] text-[var(--danger)]"><AlertTriangle className="size-4" /></span>
-              <div><DialogTitle>{confirmation.title}</DialogTitle><DialogDescription>{confirmation.description}</DialogDescription></div>
-            </div>
-          </DialogHeader>
-          <DialogBody className="space-y-3">
-            <div className="rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface-subtle)] px-3 py-3 text-[10px] leading-5 text-[var(--muted)]">{confirmation.detail}</div>
-            {confirmError && <FormError>{confirmError}</FormError>}
-          </DialogBody>
-          <DialogFooter>
-            <Button type="button" variant="secondary" size="sm" disabled={confirming} onClick={() => setConfirmTarget(null)}>返回</Button>
-            <Button type="button" variant="destructive" size="sm" disabled={confirming} onClick={executeConfirmation}>{confirming && <Loader2 className="animate-spin" />}{confirming ? "正在处理" : confirmation.action}</Button>
-          </DialogFooter>
-        </>}
-      </DialogContent>
-    </Dialog>
+    {confirmation && <ConfirmDialog open={Boolean(confirmTarget)} title={confirmation.title} description={confirmation.description} detail={confirmation.detail} confirmLabel={confirmation.action} busy={confirming} error={confirmError} onOpenChange={(open) => { if (!open) { setConfirmTarget(null); setConfirmError(""); } }} onConfirm={executeConfirmation} />}
   </div>;
 }
 

@@ -64,9 +64,12 @@ export async function DELETE(request: Request) {
   if (!id) return Response.json({ code: 400, message: "缺少订阅 ID" }, { status: 400, headers: noStoreHeaders });
   const subscription = await prisma.subscription.findFirst({ where: { id, app: { tenant: { memberships: { some: { userId: user.id } } } } }, include: { app: true } });
   if (!subscription) return Response.json({ code: 404, message: "订阅不存在或无权访问" }, { status: 404, headers: noStoreHeaders });
-  await prisma.$transaction([
-    prisma.subscription.update({ where: { id }, data: { status: "CANCELED" } }),
-    prisma.auditLog.create({ data: { tenantId: subscription.app.tenantId, actorId: user.id, action: "subscription.cancel", resource: "subscription", resourceId: id, metadata: { productId: subscription.productId }, ipAddress: requestIp(request) } }),
-  ]);
+  const canceled = await prisma.$transaction(async (transaction) => {
+    const result = await transaction.subscription.updateMany({ where: { id, status: "ACTIVE" }, data: { status: "CANCELED" } });
+    if (result.count === 0) return false;
+    await transaction.auditLog.create({ data: { tenantId: subscription.app.tenantId, actorId: user.id, action: "subscription.cancel", resource: "subscription", resourceId: id, metadata: { productId: subscription.productId }, ipAddress: requestIp(request) } });
+    return true;
+  });
+  if (!canceled) return Response.json({ code: 409, message: "订阅已经取消或暂停" }, { status: 409, headers: noStoreHeaders });
   return Response.json({ code: 200, message: "订阅已取消", data: await getApplication(subscription.appId) }, { headers: noStoreHeaders });
 }

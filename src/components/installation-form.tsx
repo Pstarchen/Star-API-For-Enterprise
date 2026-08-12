@@ -1,17 +1,17 @@
 "use client";
 
-import { Check, Copy, Eye, EyeOff, ImageIcon, Loader2, ShieldCheck, SquareTerminal, Upload } from "lucide-react";
+import { Check, Copy, ImageIcon, Loader2, ShieldCheck, SquareTerminal, Upload } from "lucide-react";
 import { ChangeEvent, FormEvent, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Button } from "./ui/button";
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "./ui/dialog";
 import { FormField, FormHint, FormLabel, FormMessage } from "./ui/form-field";
-import { Input, InputGroup, Textarea } from "./ui/input";
+import { Input, Textarea } from "./ui/input";
+import { PasswordField } from "./ui/password-field";
 
 export function InstallationForm() {
   const router = useRouter();
-  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [iconDataUrl, setIconDataUrl] = useState("");
@@ -83,7 +83,7 @@ export function InstallationForm() {
         <FormField><FormLabel>邮箱</FormLabel><Input name="adminEmail" required type="email" autoComplete="email" className="h-11 text-[12px]" /></FormField>
       </div>
     </div>
-    <FormField><FormLabel>管理员密码</FormLabel><InputGroup className="h-11"><Input name="adminPassword" required minLength={10} maxLength={72} type={showPassword ? "text" : "password"} autoComplete="new-password" placeholder="至少 10 位，包含字母和数字" className="text-[12px]" /><Button type="button" variant="ghost" size="icon" onClick={() => setShowPassword((value) => !value)} className="mr-1" aria-label={showPassword ? "隐藏密码" : "显示密码"}>{showPassword ? <EyeOff /> : <Eye />}</Button></InputGroup></FormField>
+    <PasswordField label="管理员密码" name="adminPassword" required minLength={10} maxLength={72} autoComplete="new-password" placeholder="至少 10 位，包含字母和数字" />
     {error && <FormMessage>{error}</FormMessage>}
     <Button type="submit" size="lg" disabled={loading} className="w-full">{loading && <Loader2 className="animate-spin" />}{loading ? "正在初始化" : "完成安装并进入后台"}</Button>
   </form>;

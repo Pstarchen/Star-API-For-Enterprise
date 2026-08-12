@@ -19,6 +19,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     ] },
     { href: "/admin/apis", label: "API 开放", icon: "boxes", ...(pendingApis ? { badge: String(pendingApis) } : {}), items: [
       { href: "/admin/apis", label: "API 管理", icon: "boxes" },
+      { href: "/admin/subscriptions", label: "订阅策略", icon: "subscriptions" },
       { href: "/admin/testing", label: "调试与密钥", icon: "apps" },
     ] },
     { href: "/admin/users", label: "客户与服务商", icon: "users", ...(pendingProviders ? { badge: String(pendingProviders) } : {}), items: [

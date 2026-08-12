@@ -64,7 +64,10 @@ async function createApi(cookie, config, assets = []) {
     publicHost: new URL(portalUrl).hostname,
     publicPath: `/api/${config.slug}`,
     visibility: "PUBLIC",
-    method: "GET",
+    methods: ["GET"],
+    responseFormats: ["JSON"],
+    parameters: [],
+    responseParameters: [],
     path: "/",
     requestFormat: "JSON",
     forceHttps: false,
@@ -82,6 +85,26 @@ async function createApi(cookie, config, assets = []) {
   const body = await response.json().catch(() => null);
   expectStatus(response.status, 201, `create ${config.sourceType} API`, body);
   return body.data;
+}
+
+async function importOpenApi(cookie, config, document, expectedStatus = 201) {
+  const form = new FormData();
+  form.set("config", JSON.stringify({
+    categoryId: config.categoryId ?? defaultCategoryId,
+    publicHost: new URL(portalUrl).hostname,
+    publicPrefix: `/api/${config.slug}`,
+    upstreamOverride: "",
+    visibility: "PUBLIC",
+    billingMode: "FREE",
+    unitPrice: 0,
+    defaultQpsLimit: 20,
+    ...config,
+  }));
+  form.set("document", new File([document], config.fileName ?? "openapi.yaml", { type: "application/yaml" }));
+  const response = await request("/api/v1/admin/apis/import", { method: "POST", body: form }, cookie);
+  const body = await response.json().catch(() => null);
+  expectStatus(response.status, expectedStatus, `${expectedStatus === 201 ? "import" : "reject"} OpenAPI document`, body);
+  return body;
 }
 
 async function uploadMedia(cookie, productId, name, bytes, type, expectedStatus = 201) {
@@ -176,7 +199,7 @@ async function main() {
   expectStatus(response.status, 200, "custom hero asset", await response.arrayBuffer());
   assert.equal(response.headers.get("content-type"), "image/jpeg");
 
-  for (const page of ["/admin", "/admin/apis", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
+  for (const page of ["/admin", "/admin/apis", "/admin/subscriptions", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
     response = await request(page, {}, adminCookie);
     expectStatus(response.status, 200, `administrator page ${page}`, await response.text());
   }
@@ -261,12 +284,294 @@ async function main() {
   expectStatus(result.response.status, 403, "non-admin policy access denied", result.body);
 
   const staticSlug = `static-${runId}`;
-  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(portalUrl).hostname, path: `/api/${staticSlug}`, version: "v1", method: "GET", slug: staticSlug })}`, {}, adminCookie);
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(portalUrl).hostname, path: `/api/${staticSlug}`, version: "v1", methods: "GET", slug: staticSlug })}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "route preflight available", result.body);
   assert.equal(result.body.data.available, true);
 
   const staticApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Static JSON Smoke", slug: staticSlug, content: JSON.stringify({ ok: true, source: "static-json" }), billingMode: "PER_REQUEST", unitPrice: 0.25, dailyLimit: 1 });
   const textApi = await createApi(adminCookie, { sourceType: "RANDOM_TEXT", name: "Random Text Smoke", slug: `text-${runId}`, content: "alpha\nbeta" });
+  const datasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Classified Dataset Smoke",
+    slug: `dataset-${runId}`,
+    methods: ["GET", "POST"],
+    responseFormats: ["TXT", "JSON"],
+    parameters: [
+      { location: "QUERY", name: "name", upstreamName: "", required: true, dataType: "string", defaultValue: "", description: "Dataset category or menu", pattern: "", sensitive: false },
+      { location: "QUERY", name: "type", upstreamName: "", required: false, dataType: "string", defaultValue: "txt", description: "txt or json", pattern: "^(txt|json)$", sensitive: false },
+    ],
+    responseParameters: [{ name: "content", dataType: "string", description: "Selected dataset content" }],
+    dataset: { grouping: "FILE", categoryParameter: "name", formatParameter: "type", menuValue: "menu", defaultFormat: "TXT", textField: "content", itemsPath: "" },
+  }, [
+    { name: "quotes.json", blob: new Blob([JSON.stringify([{ content: "quote-alpha", source: "json" }, { content: "quote-beta", source: "json" }])], { type: "application/json" }) },
+    { name: "notices.txt", blob: new Blob(["notice-one\nnotice-two"], { type: "text/plain" }) },
+  ]);
+  const mergedDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Merged Structured Data Smoke",
+    slug: `merged-data-${runId}`,
+    responseFormats: ["TXT", "JSON"],
+    parameters: [
+      { location: "QUERY", name: "region", upstreamName: "metadata.region", required: false, dataType: "string", defaultValue: "", description: "Filter any nested JSON field", pattern: "", sensitive: false },
+      { location: "QUERY", name: "output", upstreamName: "", required: false, dataType: "string", defaultValue: "json", description: "txt or json", pattern: "^(txt|json)$", sensitive: false },
+    ],
+    responseParameters: [{ name: "body", dataType: "string", description: "Selected record" }],
+    dataset: { grouping: "MERGED", categoryParameter: "", formatParameter: "output", menuValue: "", defaultFormat: "JSON", textField: "body", itemsPath: "payload.records" },
+  }, [
+    { name: "chapter-one.json", blob: new Blob([JSON.stringify({ payload: { records: [{ body: "north-entry", metadata: { region: "north" } }, { body: "south-entry", metadata: { region: "south" } }] } })], { type: "application/json" }) },
+    { name: "unrelated-name.txt", blob: new Blob(["plain-entry-one\nplain-entry-two"], { type: "text/plain" }) },
+  ]);
+  const genericDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Generic Dataset Smoke",
+    slug: `generic-data-${runId}`,
+    methods: undefined,
+    responseFormats: ["TXT", "JSON"],
+  }, [
+    { name: "inventory-2026.json", blob: new Blob([JSON.stringify({ labels: ["warehouse", "published"], envelope: { entries: [{ headline: "generic-alpha", metadata: { source: "fixture" } }, { headline: "generic-beta", metadata: { source: "fixture" } }] } })], { type: "application/json" }) },
+  ]);
+  assert.deepEqual(genericDatasetApi.methods, ["GET", "POST"], "dataset import without a method override must support GET and POST");
+  assert.equal(genericDatasetApi.responseExample.headline, "generic-alpha", "dataset example must come from the detected record collection");
+  assert.ok(genericDatasetApi.requestParameters.some((parameter) => parameter.name === "headline" && parameter.upstreamName === "headline" && parameter.dataType === "string"), "dataset import must infer a filter from a top-level field");
+  assert.ok(genericDatasetApi.requestParameters.some((parameter) => parameter.name === "source" && parameter.upstreamName === "metadata.source" && parameter.dataType === "string"), "dataset import must infer a filter from a nested field");
+  assert.ok(genericDatasetApi.responseParameters.some((parameter) => parameter.name === "headline" && parameter.dataType === "string"), "dataset import must infer response fields from real records");
+  assert.ok(genericDatasetApi.responseParameters.some((parameter) => parameter.name === "metadata" && parameter.dataType === "object"), "dataset import must retain nested response object types");
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(genericDatasetApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "read generic dataset configuration", result.body);
+  const genericDatasetConfig = result.body.data;
+  result = await jsonRequest("/api/v1/admin/apis/config", { method: "PATCH", body: {
+    id: genericDatasetConfig.id,
+    categoryId: genericDatasetConfig.categoryId,
+    visibility: genericDatasetConfig.visibility,
+    billingMode: genericDatasetConfig.billingMode,
+    unitPrice: genericDatasetConfig.unitPrice,
+    freeQuotaMonthly: genericDatasetConfig.freeQuotaMonthly,
+    defaultQpsLimit: genericDatasetConfig.defaultQpsLimit,
+    route: {
+      publicHost: genericDatasetConfig.route.publicHost,
+      publicPath: genericDatasetConfig.route.publicPath,
+      routeVersion: genericDatasetConfig.route.routeVersion,
+      methods: genericDatasetConfig.route.methods,
+      requestFormat: genericDatasetConfig.route.requestFormat,
+      responseFormats: genericDatasetConfig.route.responseFormats,
+      corsEnabled: genericDatasetConfig.route.corsEnabled,
+      forceHttps: genericDatasetConfig.route.forceHttps,
+      requestLogging: genericDatasetConfig.route.requestLogging,
+      dailyLimit: genericDatasetConfig.route.dailyLimit,
+      ipAllowlist: genericDatasetConfig.route.ipAllowlist,
+      ipDenylist: genericDatasetConfig.route.ipDenylist,
+    },
+    upstream: { rewriteMode: genericDatasetConfig.upstream.rewriteMode, upstreamPrefix: genericDatasetConfig.upstream.upstreamPrefix, healthPath: genericDatasetConfig.upstream.healthPath, timeoutMs: genericDatasetConfig.upstream.timeoutMs, authType: genericDatasetConfig.upstream.authType, preserveSecret: genericDatasetConfig.upstream.secretConfigured, token: "", headerName: "", headerValue: "", nodes: genericDatasetConfig.upstream.nodes.map(({ id, name, baseUrl, weight, enabled }) => ({ id, name, baseUrl, weight, enabled })) },
+    parameters: genericDatasetConfig.parameters.map(({ location, name, upstreamName, required, dataType, defaultValue, description, pattern, sensitive }) => ({ location, name, upstreamName, required, dataType, defaultValue, description, pattern, sensitive })),
+    responseParameters: [{ name: "headline", dataType: "string", description: "Selected record headline" }],
+    dataset: { ...genericDatasetConfig.dataset, itemsPath: "envelope.entries", textField: "headline" },
+  } }, adminCookie);
+  expectStatus(result.response.status, 200, "update a generic dataset contract", result.body);
+  assert.equal(result.body.data.responseExample.headline, "generic-alpha", "contract edits must preserve an example derived from current data");
+  const scalarDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Scalar Dataset Smoke",
+    slug: `scalar-data-${runId}`,
+    responseFormats: ["TXT", "JSON"],
+  }, [
+    { name: "numbers.json", blob: new Blob([JSON.stringify([7, 11, 13])], { type: "application/json" }) },
+  ]);
+  assert.deepEqual(scalarDatasetApi.responseParameters.map(({ name, dataType }) => ({ name, dataType })), [{ name: "value", dataType: "integer" }], "scalar datasets must receive a generic inferred response contract");
+  const objectMapDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Object Map Dataset Smoke",
+    slug: `object-map-${runId}`,
+    responseFormats: ["TXT", "JSON"],
+  }, [
+    { name: "arbitrary-record-map.json", blob: new Blob([`\uFEFF${JSON.stringify({ first_record: { label: "Mapped alpha", enabled: true }, second_record: { label: "Mapped beta", enabled: false } })}`], { type: "application/json" }) },
+  ]);
+  assert.ok(objectMapDatasetApi.requestParameters.some((parameter) => parameter.upstreamName === "label"), "object-map datasets must infer fields without depending on record keys or file names");
+  assert.deepEqual(objectMapDatasetApi.responseExample, { label: "Mapped alpha", enabled: true }, "UTF-8 BOM and object-map records must generate a real example");
+  const portableDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Portable File Dataset Smoke",
+    slug: `portable-data-${runId}`,
+    methods: ["GET", "POST"],
+    responseFormats: ["TXT", "JSON"],
+    parameters: [
+      { location: "QUERY", name: "region", upstreamName: "region", required: false, dataType: "string", defaultValue: "", description: "Filter records imported from any supported file format", pattern: "", sensitive: false },
+      { location: "BODY", name: "recordId", upstreamName: "id", required: false, dataType: "integer", defaultValue: "", description: "Filter a record using a JSON request body", pattern: "", sensitive: false },
+    ],
+    responseParameters: [
+      { name: "id", dataType: "integer", description: "Source record ID" },
+      { name: "message", dataType: "string", description: "Source record content" },
+    ],
+    dataset: { grouping: "MERGED", categoryParameter: "", formatParameter: "", menuValue: "", defaultFormat: "JSON", textField: "message", itemsPath: "" },
+  }, [
+    { name: "records.csv", blob: new Blob(['id,region,message\n101,north,"CSV value, with comma"'], { type: "text/csv" }) },
+    { name: "records.yaml", blob: new Blob(["- id: 202\n  region: south\n  message: YAML value\n"], { type: "application/yaml" }) },
+    { name: "records.jsonl", blob: new Blob(['{"id":303,"region":"east","message":"JSONL value"}\n{"id":304,"region":"west","message":"JSONL second value"}'], { type: "application/x-ndjson" }) },
+    { name: "records.tsv", blob: new Blob(["id\tregion\tmessage\n404\tcentral\tTSV value"], { type: "text/tab-separated-values" }) },
+  ]);
+  assert.deepEqual(portableDatasetApi.responseExample, { id: "101", region: "north", message: "CSV value, with comma" }, "CSV must generate a real response example with quoted values intact");
+  const sniffedDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "Content Sniffed Dataset Smoke",
+    slug: `sniffed-data-${runId}`,
+    responseFormats: ["TXT", "JSON"],
+    dataset: { grouping: "MERGED", categoryParameter: "", formatParameter: "", menuValue: "", defaultFormat: "JSON", textField: "message", itemsPath: "" },
+  }, [
+    { name: "release.payload", blob: new Blob([JSON.stringify([{ code: "unknown-extension", message: "Detected by content" }])], { type: "application/octet-stream" }) },
+  ]);
+  assert.deepEqual(sniffedDatasetApi.responseExample, { code: "unknown-extension", message: "Detected by content" }, "unknown text extensions must be parsed from their real content");
+  assert.ok(sniffedDatasetApi.requestParameters.some((parameter) => parameter.upstreamName === "code"), "content-sniffed datasets must receive inferred filters");
+  const zippedDatasetArchive = zipSync({
+    "north/inventory.data": strToU8("sku,region,message\nN-1,north,North archive row"),
+    "south/catalog.json": strToU8(JSON.stringify([{ sku: "S-2", region: "south", message: "South archive row" }])),
+    "__MACOSX/._catalog.json": strToU8("ignored metadata"),
+  });
+  const zippedDatasetApi = await createApi(adminCookie, {
+    sourceType: "DATASET",
+    name: "ZIP Dataset Smoke",
+    slug: `zip-data-${runId}`,
+    methods: ["GET", "POST"],
+    responseFormats: ["TXT", "JSON"],
+    parameters: [
+      { location: "QUERY", name: "category", upstreamName: "", required: false, dataType: "string", defaultValue: "", description: "Archive directory and file group", pattern: "", sensitive: false },
+      { location: "QUERY", name: "region", upstreamName: "region", required: false, dataType: "string", defaultValue: "", description: "Filter an archive record", pattern: "", sensitive: false },
+      { location: "BODY", name: "sku", upstreamName: "sku", required: false, dataType: "string", defaultValue: "", description: "Filter through a JSON request body", pattern: "", sensitive: false },
+      { location: "QUERY", name: "format", upstreamName: "", required: false, dataType: "string", defaultValue: "json", description: "txt or json", pattern: "^(txt|json)$", sensitive: false },
+    ],
+    responseParameters: [
+      { name: "sku", dataType: "string", description: "Imported record key" },
+      { name: "region", dataType: "string", description: "Imported record region" },
+      { name: "message", dataType: "string", description: "Imported record body" },
+    ],
+    dataset: { grouping: "FILE", categoryParameter: "category", formatParameter: "format", menuValue: "list", defaultFormat: "JSON", textField: "message", itemsPath: "" },
+  }, [
+    { name: "portable-content.zip", blob: new Blob([zippedDatasetArchive], { type: "application/zip" }) },
+  ]);
+  assert.deepEqual(zippedDatasetApi.responseExample, { sku: "N-1", region: "north", message: "North archive row" }, "ZIP datasets must parse mixed formats without business-specific names");
+  const binaryDatasetForm = new FormData();
+  binaryDatasetForm.set("config", JSON.stringify({ sourceType: "DATASET", categoryId: defaultCategoryId, name: "Binary Dataset", slug: `binary-data-${runId}`, publicHost: new URL(portalUrl).hostname, publicPath: `/api/binary-data-${runId}` }));
+  binaryDatasetForm.append("assets", new Blob([new Uint8Array([0, 1, 2, 3])], { type: "application/octet-stream" }), "binary.payload");
+  response = await request("/api/v1/admin/apis", { method: "POST", body: binaryDatasetForm }, adminCookie);
+  const binaryDatasetBody = await response.json();
+  expectStatus(response.status, 400, "reject binary files from generic dataset import", binaryDatasetBody);
+  assert.match(binaryDatasetBody.message, /二进制|控制字符/);
+  const invalidJsonlForm = new FormData();
+  invalidJsonlForm.set("config", JSON.stringify({ sourceType: "DATASET", categoryId: defaultCategoryId, name: "Invalid JSONL", slug: `invalid-jsonl-${runId}`, publicHost: new URL(portalUrl).hostname, publicPath: `/api/invalid-jsonl-${runId}` }));
+  invalidJsonlForm.append("assets", new Blob(['{"ok":true}\nnot-json'], { type: "application/x-ndjson" }), "invalid.jsonl");
+  response = await request("/api/v1/admin/apis", { method: "POST", body: invalidJsonlForm }, adminCookie);
+  const invalidJsonlBody = await response.json();
+  expectStatus(response.status, 400, "reject invalid JSONL with line number", invalidJsonlBody);
+  assert.match(invalidJsonlBody.message, /第 2 行/);
+  assert.equal(scalarDatasetApi.responseExample, 7, "scalar arrays must generate a real response example");
+  assert.deepEqual(staticApi.responseExample, { ok: true, source: "static-json" }, "static JSON must generate a real response example");
+  assert.equal(textApi.responseExample, "alpha", "text files must generate a real response example");
+  const openApiSlug = `openapi-${runId}`;
+  const openApiDocument = `openapi: 3.1.0
+info:
+  title: Portable OpenAPI Service
+  version: 2026.1
+  description: Imported from a generic OpenAPI document
+servers:
+  - url: https://example.com
+paths:
+  /:
+    parameters:
+      - $ref: '#/components/parameters/Language'
+    get:
+      summary: Read generic upstream page
+      responses:
+        '200':
+          $ref: '#/components/responses/HtmlResponse'
+  /entities/{entityId}:
+    get:
+      summary: Read an entity
+      parameters:
+        - name: entityId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Entity response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+              example:
+                id: 42
+                name: imported
+                active: true
+    post:
+      summary: Update an entity
+      parameters:
+        - name: entityId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EntityUpdate'
+      responses:
+        '200':
+          description: Updated entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+components:
+  parameters:
+    Language:
+      name: language
+      in: query
+      required: false
+      description: Preferred response language
+      schema:
+        type: string
+        default: zh-CN
+  responses:
+    HtmlResponse:
+      description: HTML page
+      content:
+        text/html:
+          schema:
+            type: string
+  schemas:
+    Entity:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          description: Entity identifier
+        name:
+          type: string
+          description: Entity name
+        active:
+          type: boolean
+          description: Entity state
+    EntityUpdate:
+      allOf:
+        - type: object
+          required: [name]
+          properties:
+            name:
+              type: string
+              minLength: 1
+        - type: object
+          properties:
+            active:
+              type: boolean
+`;
+  let openApiImport = await importOpenApi(adminCookie, { name: "Portable OpenAPI Service", slug: openApiSlug }, openApiDocument);
+  const openApiProduct = openApiImport.data;
+  assert.equal(openApiProduct.endpoint, `/api/${openApiSlug}`);
+  assert.ok(openApiProduct.requestParameters.some((parameter) => parameter.name === "language" && parameter.location === "QUERY" && parameter.defaultValue === "zh-CN"), "OpenAPI component parameters must be resolved");
+  openApiImport = await importOpenApi(adminCookie, { name: "Conflicting OpenAPI Service", slug: `conflict-${openApiSlug}`, publicPrefix: `/api/${openApiSlug}` }, openApiDocument, 409);
+  assert.match(openApiImport.message, /冲突/);
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nZcAAAAASUVORK5CYII=", "base64");
   const imageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Random Image Smoke", slug: `image-${runId}` }, [{ name: "pixel.png", blob: new Blob([png], { type: "image/png" }) }]);
   await uploadMedia(adminCookie, imageApi.id, "pixel-streamed.png", png, "image/png");
@@ -279,8 +584,9 @@ async function main() {
   response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(cleanupVideoApi.id)}`, { method: "DELETE" }, adminCookie);
   expectStatus(response.status, 200, "delete draft media API and stored file", await response.json());
   const phpArchive = zipSync({ "index.php": strToU8("<?php header('Content-Type: application/json'); echo json_encode(['ok' => true, 'source' => 'php']);") });
-  const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, method: "ALL", entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
+  const phpApi = await createApi(adminCookie, { sourceType: "PHP_PACKAGE", name: "PHP Smoke", slug: `php-${runId}`, methods: ["ALL"], entryFile: "index.php" }, [{ name: "smoke.zip", blob: new Blob([phpArchive], { type: "application/zip" }) }]);
   const builtinApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "UUID Smoke", slug: `uuid-${runId}`, internalHandler: "utility.uuid" });
+  const digestApi = await createApi(adminCookie, { sourceType: "BUILTIN", name: "SHA-256 Smoke", slug: `digest-${runId}`, methods: ["POST"], internalHandler: "crypto.sha256" });
   const localApi = await createApi(adminCookie, { sourceType: "SERVER_LOCAL", name: "Local Upstream Smoke", slug: `local-${runId}`, upstreamBaseUrl: `http://host.docker.internal:${localUpstreamPort}/fixed/`, rewriteMode: "EXACT", healthPath: "/health" });
   const externalApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "External Upstream Smoke", slug: `external-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
   const redirectApi = await createApi(adminCookie, { sourceType: "EXTERNAL", name: "Second External Upstream Smoke", slug: `external-second-${runId}`, upstreamBaseUrl: "https://example.com", rewriteMode: "EXACT", healthPath: "/" });
@@ -296,12 +602,12 @@ async function main() {
   assert.equal(quickApi.endpoint, `/api/${quickApi.slug}`);
   assert.equal(quickApi.publicHost, new URL(portalUrl).hostname);
 
-  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: staticApi.publicHost, path: staticApi.endpoint, version: "v1", method: "GET", slug: staticApi.slug })}`, {}, adminCookie);
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: staticApi.publicHost, path: staticApi.endpoint, version: "v1", methods: "GET", slug: staticApi.slug })}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "route preflight detects conflict", result.body);
   assert.equal(result.body.data.available, false);
   assert.equal(result.body.data.routeAvailable, false);
 
-  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: phpApi.publicHost, path: phpApi.endpoint, version: "v1", method: "GET", slug: `php-get-${runId}` })}`, {}, adminCookie);
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: phpApi.publicHost, path: phpApi.endpoint, version: "v1", methods: "GET", slug: `php-get-${runId}` })}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "ALL method route conflict detection", result.body);
   assert.equal(result.body.data.routeAvailable, false);
 
@@ -315,7 +621,7 @@ async function main() {
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
-  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) {
+  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) {
     assert.equal(product.publicHost, new URL(portalUrl).hostname, `${product.slug} must use the platform host`);
     assert.match(product.endpoint, /^\/api\//, `${product.slug} must use the /api prefix`);
   }
@@ -331,7 +637,7 @@ async function main() {
   assert.equal(result.body.data.route.publicPath, staticApi.endpoint);
   result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { ...platformSettings, publicUrl: portalUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "restoring public URL migrates API routes", result.body);
-  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
+  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "Admin API Test App", environment: "TEST" } }, adminCookie);
   expectStatus(result.response.status, 201, "administrator creates test application and API key", result.body);
@@ -353,6 +659,10 @@ async function main() {
   expectStatus(response.status, 200, "API detail uses direct public route", detailHtml);
   assert.ok(detailHtml.includes(`${portalUrl}${staticApi.endpoint}`), "API detail must use the platform domain and /api public path");
   assert.ok(!detailHtml.includes("/api/v1/gateway/"), "API detail must not add a legacy API prefix");
+  response = await request(`/apis/${datasetApi.slug}`);
+  const datasetDetailHtml = await response.text();
+  expectStatus(response.status, 200, "dataset API detail exposes contract", datasetDetailHtml);
+  assert.ok(datasetDetailHtml.includes("请求参数") && datasetDetailHtml.includes("返回参数") && datasetDetailHtml.includes("Selected dataset content"), "dataset detail must render request and response tables");
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "E2E Test App", environment: "TEST" } }, personalCookie);
   expectStatus(result.response.status, 201, "create application and API key", result.body);
@@ -361,7 +671,25 @@ async function main() {
   assert.match(apiKey, /^sk_test_/);
 
   let latestSubscriptionResult;
-  for (const product of [staticApi, textApi, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+
+  result = await jsonRequest("/api/v1/admin/subscriptions", {}, personalCookie);
+  expectStatus(result.response.status, 403, "non-admin subscription policy access denied", result.body);
+  result = await jsonRequest("/api/v1/admin/subscriptions", {}, adminCookie);
+  expectStatus(result.response.status, 200, "administrator reads subscription policies", result.body);
+  const managedSubscription = result.body.data.find((item) => item.app.id === appId && item.product.id === quickApi.id);
+  assert.ok(managedSubscription, "administrator subscription policy list must include the user's real subscription");
+  result = await jsonRequest("/api/v1/admin/subscriptions", { method: "PATCH", body: { id: managedSubscription.id, quotaMonthly: 4321, qpsLimit: 37 } }, adminCookie);
+  expectStatus(result.response.status, 200, "administrator updates subscription policy", result.body);
+  result = await jsonRequest("/api/v1/admin/subscriptions", {}, adminCookie);
+  expectStatus(result.response.status, 200, "administrator confirms persisted subscription policy", result.body);
+  const persistedSubscription = result.body.data.find((item) => item.id === managedSubscription.id);
+  assert.equal(persistedSubscription.quotaMonthly, "4321");
+  assert.equal(persistedSubscription.qpsLimit, 37);
+  response = await request("/console/apps", {}, personalCookie);
+  const userAppsHtml = await response.text();
+  expectStatus(response.status, 200, "user application page renders updated subscription quota", userAppsHtml);
+  assert.match(userAppsHtml, /本月配额[^<]*4,321[^<]*次/, "user application page must explain the configured monthly quota");
 
   const quickSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === quickApi.id);
   assert.ok(quickSubscription, "quick API subscription must exist before cancellation");
@@ -388,6 +716,120 @@ async function main() {
   expectStatus(response.status, 429, "gateway daily limit enforcement", await response.text());
   response = await request(textApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway random text call", await response.text());
+  response = await request(`${datasetApi.endpoint}?name=menu&type=json`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const datasetMenu = await response.json();
+  expectStatus(response.status, 200, "dataset category menu as JSON", datasetMenu);
+  assert.deepEqual(datasetMenu.categories, ["notices", "quotes"]);
+  response = await request(`${datasetApi.endpoint}?name=quotes&type=txt`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const datasetText = await response.text();
+  expectStatus(response.status, 200, "dataset JSON item as TXT", datasetText);
+  assert.ok(["quote-alpha", "quote-beta"].includes(datasetText));
+  response = await request(`${datasetApi.endpoint}?name=quotes&type=json`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const datasetJson = await response.json();
+  expectStatus(response.status, 200, "dataset JSON item as JSON", datasetJson);
+  assert.ok(["quote-alpha", "quote-beta"].includes(datasetJson.content));
+  response = await request(datasetApi.endpoint, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: JSON.stringify({ name: "notices" }) });
+  const datasetPostText = await response.text();
+  expectStatus(response.status, 200, "dataset POST method call", datasetPostText);
+  assert.ok(["notice-one", "notice-two"].includes(datasetPostText));
+  response = await request(`${mergedDatasetApi.endpoint}?region=north&output=txt`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const mergedDatasetText = await response.text();
+  expectStatus(response.status, 200, "merged dataset nested-field filter as TXT", mergedDatasetText);
+  assert.equal(mergedDatasetText, "north-entry");
+  response = await request(`${mergedDatasetApi.endpoint}?region=south&output=json`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const mergedDatasetJson = await response.json();
+  expectStatus(response.status, 200, "merged dataset nested-field filter as JSON", mergedDatasetJson);
+  assert.equal(mergedDatasetJson.body, "south-entry");
+  response = await request(genericDatasetApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } });
+  const genericDatasetJson = await response.json();
+  expectStatus(response.status, 200, "generic dataset without business-specific configuration as JSON", genericDatasetJson);
+  assert.ok(["generic-alpha", "generic-beta"].includes(genericDatasetJson.headline));
+  response = await request(genericDatasetApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/plain" } });
+  const genericDatasetText = await response.text();
+  expectStatus(response.status, 200, "generic dataset response negotiation through Accept header", genericDatasetText);
+  assert.ok(["generic-alpha", "generic-beta"].includes(genericDatasetText));
+  response = await request(scalarDatasetApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } });
+  const scalarDatasetJson = await response.json();
+  expectStatus(response.status, 200, "scalar JSON dataset call", scalarDatasetJson);
+  assert.ok([7, 11, 13].includes(scalarDatasetJson));
+  response = await request(scalarDatasetApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/plain" } });
+  const scalarDatasetText = await response.text();
+  expectStatus(response.status, 200, "scalar dataset as TXT", scalarDatasetText);
+  assert.ok(["7", "11", "13"].includes(scalarDatasetText));
+  response = await request(`${objectMapDatasetApi.endpoint}?enabled=false`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } });
+  const objectMapDatasetJson = await response.json();
+  expectStatus(response.status, 200, "object-map dataset boolean filter", objectMapDatasetJson);
+  assert.deepEqual(objectMapDatasetJson, { label: "Mapped beta", enabled: false });
+  response = await request(`${portableDatasetApi.endpoint}?region=north`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/plain" } });
+  const portableCsvText = await response.text();
+  expectStatus(response.status, 200, "CSV record as TXT", portableCsvText);
+  assert.equal(portableCsvText, "CSV value, with comma");
+  response = await request(portableDatasetApi.endpoint, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ recordId: 202 }) });
+  const portableYamlJson = await response.json();
+  expectStatus(response.status, 200, "YAML record filtered by POST body", portableYamlJson);
+  assert.deepEqual(portableYamlJson, { id: 202, region: "south", message: "YAML value" });
+  response = await request(`${portableDatasetApi.endpoint}?region=east`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/plain" } });
+  const portableJsonlText = await response.text();
+  expectStatus(response.status, 200, "JSONL record as TXT", portableJsonlText);
+  assert.equal(portableJsonlText, "JSONL value");
+  response = await request(`${portableDatasetApi.endpoint}?region=central`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } });
+  const portableTsvJson = await response.json();
+  expectStatus(response.status, 200, "TSV record as JSON", portableTsvJson);
+  assert.deepEqual(portableTsvJson, { id: "404", region: "central", message: "TSV value" });
+  response = await request(`${sniffedDatasetApi.endpoint}?code=unknown-extension`, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/plain" } });
+  const sniffedDatasetText = await response.text();
+  expectStatus(response.status, 200, "content-sniffed dataset filter and TXT response", sniffedDatasetText);
+  assert.equal(sniffedDatasetText, "Detected by content");
+  response = await request(`${zippedDatasetApi.endpoint}?category=list&format=json`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const zippedDatasetMenu = await response.json();
+  expectStatus(response.status, 200, "ZIP dataset directory groups", zippedDatasetMenu);
+  assert.deepEqual(zippedDatasetMenu.categories, ["north--inventory", "south--catalog"]);
+  response = await request(`${zippedDatasetApi.endpoint}?region=north&format=txt`, { headers: { Authorization: `Bearer ${apiKey}` } });
+  const zippedCsvText = await response.text();
+  expectStatus(response.status, 200, "ZIP dataset mixed-format GET filter", zippedCsvText);
+  assert.equal(zippedCsvText, "North archive row");
+  response = await request(zippedDatasetApi.endpoint, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify({ sku: "S-2" }) });
+  const zippedJsonRecord = await response.json();
+  expectStatus(response.status, 200, "ZIP dataset POST body filter", zippedJsonRecord);
+  assert.deepEqual(zippedJsonRecord, { sku: "S-2", region: "south", message: "South archive row" });
+  response = await request(openApiProduct.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "text/html" } });
+  const importedOpenApiHtml = await response.text();
+  expectStatus(response.status, 200, "imported OpenAPI gateway path mapping", importedOpenApiHtml);
+  assert.match(importedOpenApiHtml, /Example Domain/);
+  result = await jsonRequest(`/api/v1/admin/apis/routes/check?${new URLSearchParams({ host: new URL(portalUrl).hostname, path: `/api/${openApiSlug}/entities/{entityId}`, version: "2026.1", methods: "GET,POST", slug: `unrelated-${runId}` })}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "imported OpenAPI path and methods exist", result.body);
+  assert.equal(result.body.data.routeAvailable, false);
+
+  const replacementDataset = new FormData();
+  replacementDataset.set("productId", genericDatasetApi.id);
+  replacementDataset.append("assets", new Blob([JSON.stringify({ hints: ["not", "records"], records: [{ state: "ready" }, { state: "standby" }] })], { type: "application/json" }), "service-state.json");
+  response = await request("/api/v1/admin/apis/assets", { method: "POST", body: replacementDataset }, adminCookie);
+  expectStatus(response.status, 400, "reject replacement that violates the configured data path", await response.json());
+  const validReplacementDataset = new FormData();
+  validReplacementDataset.set("productId", genericDatasetApi.id);
+  validReplacementDataset.append("assets", new Blob([JSON.stringify({ hints: ["not", "records"], envelope: { entries: [{ state: "ready" }, { state: "standby" }] } })], { type: "application/json" }), "service-state.json");
+  response = await request("/api/v1/admin/apis/assets", { method: "POST", body: validReplacementDataset }, adminCookie);
+  expectStatus(response.status, 201, "replace a generic dataset", await response.json());
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(genericDatasetApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "dataset replacement refreshes response example", result.body);
+  assert.deepEqual(result.body.data.route.responseExample, { state: "ready" });
+  assert.equal(result.body.data.dataset.contractMode, "AUTO");
+  assert.ok(result.body.data.parameters.some((parameter) => parameter.name === "state" && parameter.upstreamName === "state"), "automatic contracts must refresh request fields after replacing a dataset");
+  assert.deepEqual(result.body.data.responseParameters.map(({ name, dataType }) => ({ name, dataType })), [{ name: "state", dataType: "string" }], "automatic contracts must discard stale response fields after replacing a dataset");
+  response = await request(genericDatasetApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" } });
+  const replacementDatasetJson = await response.json();
+  expectStatus(response.status, 200, "replacement dataset is live", replacementDatasetJson);
+  assert.ok(["ready", "standby"].includes(replacementDatasetJson.state));
+  const manualReplacement = new FormData();
+  manualReplacement.set("productId", portableDatasetApi.id);
+  manualReplacement.append("assets", new Blob([JSON.stringify([{ id: 505, region: "remote", message: "Manual contract value", extra: true }])], { type: "application/json" }), "manual-replacement.json");
+  response = await request("/api/v1/admin/apis/assets", { method: "POST", body: manualReplacement }, adminCookie);
+  expectStatus(response.status, 201, "replace a manually contracted dataset", await response.json());
+  result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(portableDatasetApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "manual dataset contract survives replacement", result.body);
+  assert.equal(result.body.data.dataset.contractMode, "MANUAL");
+  assert.ok(result.body.data.parameters.some((parameter) => parameter.name === "recordId" && parameter.upstreamName === "id"), "manual request fields must be retained after replacing data");
+  assert.deepEqual(result.body.data.responseParameters.map(({ name }) => name), ["id", "message"], "manual response fields must be retained after replacing data");
   response = await request(imageApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway random image call", await response.text());
   assert.match(response.headers.get("content-type") ?? "", /^image\//);
@@ -400,6 +842,10 @@ async function main() {
   expectStatus(response.status, 200, "isolated PHP gateway call", await response.text());
   response = await request(builtinApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "built-in API gateway call", await response.text());
+  response = await request(digestApi.endpoint, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "text/plain" }, body: "general-purpose-input" });
+  const digestResponse = await response.json();
+  expectStatus(response.status, 200, "built-in POST preserves an unstructured request body", digestResponse);
+  assert.match(digestResponse.data.digest, /^[a-f0-9]{64}$/);
   response = await request(localApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   const localResponse = await response.json();
   expectStatus(response.status, 200, "server-local exact-address gateway call", localResponse);

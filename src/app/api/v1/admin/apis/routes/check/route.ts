@@ -9,7 +9,14 @@ const querySchema = z.object({
   host: z.string().trim().min(1).max(253).transform(normalizePublicHost),
   path: pathSchema,
   version: z.string().trim().min(1).max(24).regex(/^[A-Za-z0-9._-]+$/),
-  method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE", "ALL"]),
+  methods: z.string().transform((value, context) => {
+    const methods = value.split(",").map((item) => item.trim()).filter(Boolean);
+    if (!methods.length || methods.some((method) => !["GET", "POST", "PUT", "PATCH", "DELETE", "ALL"].includes(method))) {
+      context.addIssue({ code: "custom", message: "请求方法不正确" });
+      return z.NEVER;
+    }
+    return methods;
+  }),
   slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/).optional(),
 }).strict();
 
@@ -30,7 +37,7 @@ export async function GET(request: Request) {
   if (!parsed.success) return Response.json({ code: 400, message: "路由检查参数不正确", details: z.flattenError(parsed.error) }, { status: 400, headers: noStoreHeaders });
   const route = parsed.data;
   const [routeConflict, slugConflict] = await Promise.all([
-    findRouteConflict({ publicHost: route.host, publicPath: route.path, routeVersion: route.version, method: route.method }),
+    findRouteConflict({ publicHost: route.host, publicPath: route.path, routeVersion: route.version, methods: route.methods }),
     route.slug ? findSlugConflict(route.slug) : null,
   ]);
   const available = !routeConflict && !slugConflict;
@@ -41,8 +48,8 @@ export async function GET(request: Request) {
       available,
       routeAvailable: !routeConflict,
       slugAvailable: !slugConflict,
-      normalized: { publicHost: route.host, publicPath: route.path, routeVersion: route.version, method: route.method },
-      conflict: routeConflict ? { type: "route", apiId: routeConflict.version.product.id, apiName: routeConflict.version.product.name, apiSlug: routeConflict.version.product.slug, method: routeConflict.method, publicPath: routeConflict.publicPath } : slugConflict ? { type: "slug", apiId: slugConflict.id, apiName: slugConflict.name, apiSlug: slugConflict.slug } : null,
+      normalized: { publicHost: route.host, publicPath: route.path, routeVersion: route.version, methods: route.methods },
+      conflict: routeConflict ? { type: "route", apiId: routeConflict.version.product.id, apiName: routeConflict.version.product.name, apiSlug: routeConflict.version.product.slug, methods: routeConflict.methods, publicPath: routeConflict.publicPath } : slugConflict ? { type: "slug", apiId: slugConflict.id, apiName: slugConflict.name, apiSlug: slugConflict.slug } : null,
     },
   }, { headers: noStoreHeaders });
 }
