@@ -8,6 +8,10 @@ FROM base AS dependencies
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 
+FROM base AS migrator-dependencies
+COPY deploy/migrator/package.json deploy/migrator/package-lock.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev --no-audit --no-fund
+
 FROM dependencies AS prisma-client
 ARG PRISMA_ENGINES_MIRROR
 ENV PRISMA_ENGINES_MIRROR=${PRISMA_ENGINES_MIRROR}
@@ -20,7 +24,7 @@ COPY . .
 ENV DATABASE_URL="postgresql://starapi:build-only@postgres:5432/starapi?schema=public"
 RUN npm run build
 
-FROM dependencies AS migrator
+FROM migrator-dependencies AS migrator
 COPY prisma ./prisma
 COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/star-api-entrypoint
 ENTRYPOINT ["/usr/local/bin/star-api-entrypoint"]
