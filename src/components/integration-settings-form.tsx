@@ -1,7 +1,8 @@
 "use client";
 
-import { CheckCircle2, Code2, CreditCard, GitBranch, Landmark, Loader2, Mail, Save, Send } from "lucide-react";
+import { Check, CheckCircle2, Code2, Copy, CreditCard, ExternalLink, Eye, EyeOff, GitBranch as Github, KeyRound, Landmark, Link2, Loader2, Mail, QrCode, Save, Send, ShieldCheck } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
+import { absoluteOAuthUrl, GITHUB_OAUTH_CALLBACK_PATH, GITHUB_OAUTH_SCOPES, OAUTH_FRONTEND_CALLBACK_PATH } from "@/lib/oauth";
 import type { IntegrationKey } from "@/lib/server/integrations";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -15,6 +16,7 @@ export type IntegrationSummary = {
   key: IntegrationKey;
   enabled: boolean;
   configured: boolean;
+  secretConfigured?: boolean;
   publicConfig: Record<string, unknown>;
 };
 
@@ -23,6 +25,7 @@ type FieldSpec = {
   label: string;
   type?: string;
   placeholder?: string;
+  helper?: string;
   secret?: boolean;
   multiline?: boolean;
 };
@@ -37,11 +40,11 @@ type Definition = {
 const definitions: Record<IntegrationKey, Definition> = {
   github: {
     label: "GitHub 登录",
-    description: "OAuth 登录、账号绑定与个人空间自动创建",
-    icon: GitBranch,
+    description: "OAuth 登录、账号绑定与新用户个人空间创建",
+    icon: Github,
     fields: [
-      { name: "clientId", label: "OAuth Client ID" },
-      { name: "clientSecret", label: "OAuth Client Secret", secret: true },
+      { name: "clientId", label: "Client ID", placeholder: "GitHub OAuth Client ID", helper: "来自 GitHub OAuth App 的 Client ID。" },
+      { name: "clientSecret", label: "Client Secret", placeholder: "GitHub OAuth Client Secret", helper: "仅在浏览器提交时传输，服务端加密保存且不会回传原文。", secret: true },
     ],
   },
   smtp: {
@@ -95,14 +98,25 @@ const definitions: Record<IntegrationKey, Definition> = {
       { name: "instructions", label: "汇款说明", multiline: true },
     ],
   },
+  "code-pay": {
+    label: "码支付",
+    description: "通用收款码或支付链接，付款后由管理员核验到账",
+    icon: QrCode,
+    fields: [
+      { name: "paymentName", label: "收款方式名称", placeholder: "例如：微信/支付宝收款码" },
+      { name: "qrImageUrl", label: "收款码图片地址", type: "url", placeholder: "https://example.com/payment-qr.png", helper: "建议使用 HTTPS 图片地址；不填写图片时可仅使用支付链接" },
+      { name: "paymentUrl", label: "支付链接（可选）", type: "url", placeholder: "https://..." },
+      { name: "instructions", label: "支付说明", multiline: true, placeholder: "请付款后保留订单号，等待管理员确认到账" },
+    ],
+  },
 };
 
-export function IntegrationSettingsForm({ initial, keys, eyebrow = "PLATFORM INTEGRATIONS", title = "登录、邮件与收款", description = "敏感凭据加密保存，后台只显示配置状态，不回传原文。" }: { initial: IntegrationSummary[]; keys?: IntegrationKey[]; eyebrow?: string; title?: string; description?: string }) {
+export function IntegrationSettingsForm({ initial, keys, publicUrl = "", eyebrow = "PLATFORM INTEGRATIONS", title = "登录、邮件与收款", description = "敏感凭据加密保存，后台只显示配置状态，不回传原文。" }: { initial: IntegrationSummary[]; keys?: IntegrationKey[]; publicUrl?: string; eyebrow?: string; title?: string; description?: string }) {
   const visibleKeys = keys?.length ? keys : Object.keys(definitions) as IntegrationKey[];
   const [items, setItems] = useState(initial);
   const [active, setActive] = useState<IntegrationKey>(visibleKeys[0]);
   const current = useMemo(
-    () => items.find((item) => item.key === active) ?? { key: active, enabled: false, configured: false, publicConfig: {} },
+    () => items.find((item) => item.key === active) ?? { key: active, enabled: false, configured: false, secretConfigured: false, publicConfig: {} },
     [active, items],
   );
 
@@ -130,13 +144,14 @@ export function IntegrationSettingsForm({ initial, keys, eyebrow = "PLATFORM INT
         key={active}
         item={current}
         definition={definitions[active]}
+        publicUrl={publicUrl}
         onSaved={(next) => setItems((values) => values.map((item) => item.key === next.key ? next : item))}
       />
     </div>
   );
 }
 
-function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSummary; definition: Definition; onSaved: (item: IntegrationSummary) => void }) {
+function IntegrationEditor({ item, definition, publicUrl, onSaved }: { item: IntegrationSummary; definition: Definition; publicUrl: string; onSaved: (item: IntegrationSummary) => void }) {
   const [enabled, setEnabled] = useState(item.enabled);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -147,6 +162,7 @@ function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSum
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setSaving(true);
     setSaved(false);
     setError("");
@@ -175,6 +191,11 @@ function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSum
         return;
       }
       onSaved(result.data);
+      for (const field of definition.fields) {
+        if (!field.secret) continue;
+        const secretField = formElement.elements.namedItem(field.name);
+        if (secretField instanceof HTMLInputElement || secretField instanceof HTMLTextAreaElement) secretField.value = "";
+      }
       setSaved(true);
     } catch {
       setError("无法连接集成配置服务");
@@ -217,10 +238,11 @@ function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSum
         </label>
       </div>
       <form onSubmit={submit}>
+        {item.key === "github" && <GitHubSetupGuide publicUrl={publicUrl} />}
         <div className="grid gap-4 p-5 sm:grid-cols-2">
-          {definition.fields.map((field) => <IntegrationField key={field.name} field={field} item={item} />)}
+          {definition.fields.map((field) => <IntegrationField key={field.name} field={field} item={item} enabled={enabled} />)}
           {item.key === "smtp" && <label className="flex items-center gap-2 text-[10px]"><Checkbox name="secure" defaultChecked={item.publicConfig.secure === true} />使用 TLS 直连</label>}
-          {item.configured && item.key !== "bank-transfer" && <label className="flex items-center gap-2 text-[9px] text-[var(--danger)]"><Checkbox name="removeSecrets" />保存时移除现有凭据</label>}
+          {item.secretConfigured && item.key !== "bank-transfer" && <label className="flex items-center gap-2 text-[9px] text-[var(--danger)]"><Checkbox name="removeSecrets" />保存时移除现有凭据</label>}
           {error && <FormMessage className="sm:col-span-2">{error}</FormMessage>}
         </div>
         <div className="flex items-center justify-end gap-3 border-t border-[var(--line)] px-5 py-4">
@@ -239,18 +261,85 @@ function IntegrationEditor({ item, definition, onSaved }: { item: IntegrationSum
   );
 }
 
-function IntegrationField({ field, item }: { field: FieldSpec; item: IntegrationSummary }) {
+function IntegrationField({ field, item, enabled }: { field: FieldSpec; item: IntegrationSummary; enabled: boolean }) {
+  const [revealed, setRevealed] = useState(false);
   const value = field.secret ? "" : String(item.publicConfig[field.name] ?? "");
-  const placeholder = field.secret && item.configured ? "留空保留当前密钥" : field.placeholder;
+  const placeholder = field.secret && item.secretConfigured ? "留空保留当前密钥" : field.placeholder;
+  const required = item.key === "github" && enabled && (field.name === "clientId" || (field.name === "clientSecret" && !item.secretConfigured));
   return (
     <label className={field.multiline ? "block sm:col-span-2" : "block"}>
       <span className="mb-1.5 block text-[10px] font-semibold">{field.label}</span>
       {field.multiline ? (
-        <Textarea name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} className="mono text-[10px]" />
+        <Textarea name={field.name} rows={field.secret ? 4 : 3} defaultValue={value} placeholder={placeholder} required={required} className="mono text-[10px]" />
+      ) : field.secret ? (
+        <div className="relative">
+          <Input name={field.name} type={revealed ? "text" : "password"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="new-password" className="pr-11" />
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setRevealed((current) => !current)} className="absolute right-1 top-1" aria-label={revealed ? `隐藏${field.label}` : `显示${field.label}`}>{revealed ? <EyeOff /> : <Eye />}</Button>
+        </div>
       ) : (
-        <Input name={field.name} type={field.secret ? "password" : field.type ?? "text"} defaultValue={value} placeholder={placeholder} autoComplete="off" />
+        <Input name={field.name} type={field.type ?? "text"} defaultValue={value} placeholder={placeholder} required={required} autoComplete="off" />
       )}
-      {field.secret && <small className="mt-1 block text-[8px] text-[var(--muted)]">新值提交后加密保存，页面不会再次显示。</small>}
+      {(field.helper || field.secret) && <small className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{field.helper ?? "新值提交后加密保存，页面不会再次显示。"}</small>}
     </label>
   );
+}
+
+function GitHubSetupGuide({ publicUrl }: { publicUrl: string }) {
+  const [copied, setCopied] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const homepageUrl = publicOrigin(publicUrl);
+  const backendCallbackUrl = oauthAddress(publicUrl, GITHUB_OAUTH_CALLBACK_PATH);
+
+  async function copy(value: string, key: string) {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => current === key ? "" : current), 1400);
+    } catch {
+      setCopyError("浏览器未授权写入剪贴板，请手动选中地址复制。");
+    }
+  }
+
+  return <div className="border-b border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-5">
+    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+      <div className="flex gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--ink)] text-[var(--surface)]"><Github className="size-4" /></span><div><strong className="block text-[12px]">创建 GitHub OAuth App</strong><p className="mt-1 max-w-xl text-[10px] leading-5 text-[var(--muted)]">GitHub 登录需要读取公开资料和已验证邮箱。请使用下面生成的地址创建 OAuth App，再填写凭据并启用。</p></div></div>
+      <Button asChild type="button" variant="secondary" size="sm"><a href="https://github.com/settings/developers" target="_blank" rel="noreferrer">打开 OAuth Apps<ExternalLink /></a></Button>
+    </div>
+
+    <ol className="mt-5 grid border-y border-[var(--line)] sm:grid-cols-3 sm:divide-x sm:divide-[var(--line)]">
+      <SetupStep number="01" title="新建应用" text="GitHub Settings → Developer settings → OAuth Apps → New OAuth App" />
+      <SetupStep number="02" title="填写地址" text="Homepage URL 使用站点域名；Authorization callback URL 使用后端回调地址。" />
+      <SetupStep number="03" title="保存并启用" text="生成 Client Secret，填入下方凭据；保存成功后再开启 GitHub 登录。" />
+    </ol>
+
+    <div className="mt-4 flex flex-wrap items-center gap-2 text-[10px]"><ShieldCheck className="size-3.5 text-[var(--success)]" /><span className="font-semibold">所需权限</span>{GITHUB_OAUTH_SCOPES.map((scope) => <code key={scope} className="rounded-[6px] border border-[var(--line)] bg-[var(--surface-raised)] px-2 py-1 text-[9px] text-[var(--brand-strong)]">{scope}</code>)}</div>
+
+    <div className="mt-4 divide-y divide-[var(--line)] border-y border-[var(--line)]">
+      <OAuthAddress icon={Link2} label="Homepage URL" description="填写站点公开访问域名" value={homepageUrl} copied={copied === "home"} copyLabel="复制" onCopy={() => copy(homepageUrl, "home")} />
+      <OAuthAddress icon={KeyRound} label="后端回调地址" description="填写到 Authorization callback URL" value={backendCallbackUrl} copied={copied === "backend"} copyLabel="生成并复制" onCopy={() => copy(backendCallbackUrl, "backend")} />
+      <OAuthAddress icon={CheckCircle2} label="前端回调地址" description="后端验证成功后的平台内部完成页，无需填写到 GitHub" value={OAUTH_FRONTEND_CALLBACK_PATH} copied={copied === "frontend"} copyLabel="复制" onCopy={() => copy(OAUTH_FRONTEND_CALLBACK_PATH, "frontend")} />
+    </div>
+    {copyError && <FormMessage className="mt-3">{copyError}</FormMessage>}
+  </div>;
+}
+
+function SetupStep({ number, title, text }: { number: string; title: string; text: string }) {
+  return <li className="flex gap-3 py-3 sm:px-4 sm:first:pl-0 sm:last:pr-0"><span className="mono text-[9px] font-bold text-[var(--brand)]">{number}</span><span><strong className="block text-[10px]">{title}</strong><small className="mt-1 block text-[9px] leading-4 text-[var(--muted)]">{text}</small></span></li>;
+}
+
+function OAuthAddress({ icon: Icon, label, description, value, copied, copyLabel, onCopy }: { icon: typeof Link2; label: string; description: string; value: string; copied: boolean; copyLabel: string; onCopy: () => void }) {
+  return <div className="grid items-center gap-3 py-3 sm:grid-cols-[156px_minmax(0,1fr)_auto]">
+    <span className="flex items-center gap-2"><Icon className="size-3.5 text-[var(--brand)]" /><span><strong className="block text-[10px]">{label}</strong><small className="mt-0.5 block text-[8px] text-[var(--muted)]">{description}</small></span></span>
+    <code className="min-w-0 overflow-x-auto whitespace-nowrap rounded-[6px] bg-[var(--surface-raised)] px-3 py-2 text-[10px] text-[var(--ink)] shadow-[var(--shadow-inset)]">{value}</code>
+    <Button type="button" variant="secondary" size="sm" onClick={onCopy} aria-label={`${copied ? "已复制" : copyLabel}${label}`}>{copied ? <Check className="text-[var(--success)]" /> : <Copy />}{copied ? "已复制" : copyLabel}</Button>
+  </div>;
+}
+
+function publicOrigin(publicUrl: string) {
+  try { return new URL(publicUrl).origin; } catch { return "请先在基础设置填写网站公开访问地址"; }
+}
+
+function oauthAddress(publicUrl: string, path: string) {
+  try { return absoluteOAuthUrl(publicUrl, path); } catch { return path; }
 }

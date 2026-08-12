@@ -19,7 +19,7 @@ export default async function AdminPage() {
     prisma.paymentOrder.aggregate({ where: { status: "PAID", paidAt: { gte: month } }, _sum: { amount: true } }),
     prisma.apiProduct.findMany({ where: { status: { in: ["DRAFT", "REVIEW"] } }, include: { provider: true }, orderBy: { updatedAt: "desc" }, take: 5 }),
     prisma.provider.findMany({ where: { verifiedAt: null }, orderBy: { createdAt: "asc" }, take: 5 }),
-    prisma.paymentOrder.findMany({ where: { channel: "BANK_TRANSFER", status: "PENDING" }, include: { tenant: true, invoice: true }, orderBy: { createdAt: "asc" }, take: 5 }),
+    prisma.paymentOrder.findMany({ where: { channel: { in: ["BANK_TRANSFER", "CODE_PAY"] }, status: "PENDING" }, include: { tenant: true, invoice: true }, orderBy: { createdAt: "asc" }, take: 5 }),
     prisma.requestLog.aggregate({ where: { occurredAt: { gte: recent } }, _avg: { latencyMs: true } }),
     prisma.requestLog.count({ where: { occurredAt: { gte: recent }, statusCode: { gte: 500 } } }),
     prisma.requestLog.count({ where: { occurredAt: { gte: recent } } }),

@@ -17,7 +17,8 @@ export async function POST(request: Request) {
   if (!(await isInstalled())) {
     return Response.json({ code: 503, message: "平台尚未完成初始化", data: { next: "/install" } }, { status: 503, headers: noStoreHeaders });
   }
-  if (!(await getAuthPolicy()).passwordLoginEnabled) {
+  const authPolicy = await getAuthPolicy();
+  if (!authPolicy.passwordLoginEnabled) {
     return Response.json({ code: 403, message: "邮箱密码登录当前已关闭，请使用平台提供的其他登录方式" }, { status: 403, headers: noStoreHeaders });
   }
   const parsed = loginSchema.safeParse(await request.json().catch(() => null));
@@ -39,6 +40,10 @@ export async function POST(request: Request) {
   if (!user || !passwordMatches || user.status !== "ACTIVE") {
     await recordFailedLogin(email, ipAddress);
     return Response.json({ code: 401, message: "邮箱或密码不正确" }, { status: 401, headers: noStoreHeaders });
+  }
+
+  if (authPolicy.registrationEmailVerificationRequired && user.emailVerificationRequired && !user.emailVerifiedAt) {
+    return Response.json({ code: 403, message: "请先完成邮箱验证后再登录", data: { emailVerificationRequired: true, email: user.email } }, { status: 403, headers: noStoreHeaders });
   }
 
   await prisma.$transaction([

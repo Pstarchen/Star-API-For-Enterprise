@@ -155,9 +155,13 @@ async function main() {
   expectStatus(result.response.status, 200, "read authentication policy", result.body);
   assert.deepEqual(result.body.data, { passwordLoginEnabled: true, registrationEnabled: true });
 
-  response = await request("/api/v1/auth/github");
+  response = await request("/api/v1/auth/oauth/github");
   expectStatus(response.status, 302, "GitHub disabled redirect", await response.text());
   assert.match(response.headers.get("location") ?? "", /github_not_configured/);
+
+  response = await request("/api/v1/auth/oauth/github/callback");
+  expectStatus(response.status, 302, "GitHub invalid callback redirect", await response.text());
+  assert.match(response.headers.get("location") ?? "", /github_invalid_callback/);
 
   result = await jsonRequest("/api/v1/admin/integrations", { method: "PATCH", body: {
     key: "github",
@@ -168,11 +172,16 @@ async function main() {
   } }, adminCookie);
   expectStatus(result.response.status, 200, "enable GitHub configuration", result.body);
 
-  response = await request("/api/v1/auth/github");
+  response = await request("/api/v1/auth/oauth/github");
   expectStatus(response.status, 302, "GitHub enabled authorization redirect", await response.text());
   const githubLocation = response.headers.get("location") ?? "";
   assert.equal(new URL(githubLocation).hostname, "github.com");
   assert.ok(new URL(githubLocation).searchParams.get("state"), "GitHub authorization must include state");
+  assert.equal(new URL(githubLocation).searchParams.get("scope"), "read:user user:email");
+  assert.equal(new URL(githubLocation).searchParams.get("redirect_uri"), `${portalUrl}/api/v1/auth/oauth/github/callback`);
+
+  response = await request("/auth/oauth/callback?next=/admin/settings/integrations", {}, adminCookie);
+  expectStatus(response.status, 200, "OAuth frontend completion page", await response.text());
 
   result = await jsonRequest("/api/v1/admin/auth-policy", { method: "PATCH", body: { passwordLoginEnabled: false, registrationEnabled: false } }, adminCookie);
   expectStatus(result.response.status, 409, "prevent administrator login lockout", result.body);
@@ -200,6 +209,10 @@ async function main() {
   expectStatus(result.response.status, 200, "personal password login", result.body);
   personalCookie = cookieFrom(result.response);
 
+  result = await jsonRequest("/api/v1/tenant/settings", { method: "PATCH", body: { name: "Personal User", creditCode: null, notificationEmail: "", timezone: "Asia/Shanghai", quotaAlerts: false, balanceAlerts: false } }, personalCookie);
+  expectStatus(result.response.status, 200, "personal workspace settings accept an absent credit code", result.body);
+  assert.equal(result.body.data.creditCode, null);
+
   const enterpriseEmail = `enterprise-${runId}@example.test`;
   result = await jsonRequest("/api/v1/auth/register", { method: "POST", body: { accountType: "enterprise", name: "Enterprise Owner", companyName: "E2E Enterprise", email: enterpriseEmail, password, acceptedTerms: true } });
   expectStatus(result.response.status, 201, "enterprise user registration", result.body);
@@ -208,6 +221,10 @@ async function main() {
   result = await jsonRequest("/api/v1/auth/me", {}, enterpriseCookie);
   expectStatus(result.response.status, 200, "enterprise user session", result.body);
   assert.equal(result.body.data.workspaces[0].status, "PENDING");
+
+  result = await jsonRequest("/api/v1/tenant/settings", { method: "PATCH", body: { name: "E2E Enterprise", creditCode: "", notificationEmail: "", timezone: "Asia/Shanghai", quotaAlerts: true, balanceAlerts: true } }, enterpriseCookie);
+  expectStatus(result.response.status, 200, "enterprise workspace settings accept optional fields", result.body);
+  assert.equal(result.body.data.notificationEmail, null);
 
   result = await jsonRequest("/api/v1/admin/auth-policy", {}, personalCookie);
   expectStatus(result.response.status, 403, "non-admin policy access denied", result.body);

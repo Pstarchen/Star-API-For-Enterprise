@@ -70,7 +70,7 @@ services:
     init: true
     environment:
       NODE_ENV: production
-      APP_VERSION: ${APP_VERSION:-0.1.1}
+      APP_VERSION: ${APP_VERSION:-0.1.2}
       STAR_API_SECRETS_DIR: /run/star-api-secrets
       REDIS_URL: redis://redis:6379
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-true}

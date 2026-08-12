@@ -25,7 +25,7 @@ export default async function Home() {
     { value: publishedApis.toLocaleString("zh-CN"), label: "开放 API", note: "当前已发布", icon: CircleGauge },
   ];
 
-  return <PortalShell>
+  return <PortalShell overlayHeader>
     <section className="home-hero">
       <Image src={platformHeroUrl(platform)} alt={`${platform.name} 首页视觉`} fill priority unoptimized className="home-hero-image" sizes="100vw" />
       <div className="container-shell home-hero-layout">

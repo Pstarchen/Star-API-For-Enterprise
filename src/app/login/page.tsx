@@ -15,6 +15,6 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   if (user) redirect(user.platformRole === "ADMIN" ? "/admin" : "/console");
   const platform = await getPlatformConfig();
   const [github, authPolicy] = await Promise.all([getIntegration("github"), getAuthPolicy()]);
-  const oauthError = (await searchParams).oauthError;
-  return <AuthShell title={`登录 ${platform.name}`} description="进入你的个人空间或企业工作区，继续管理接口与调用。"><LoginForm passwordLoginEnabled={authPolicy.passwordLoginEnabled} registrationEnabled={authPolicy.registrationEnabled} githubEnabled={github.enabled && github.configured} oauthError={typeof oauthError === "string" ? oauthError : undefined} /></AuthShell>;
+  const params = await searchParams;
+  return <AuthShell title={`登录 ${platform.name}`} description="进入你的个人空间或企业工作区，继续管理接口与调用。"><LoginForm passwordLoginEnabled={authPolicy.passwordLoginEnabled} registrationEnabled={authPolicy.registrationEnabled} githubEnabled={github.enabled && github.configured} oauthError={typeof params.oauthError === "string" ? params.oauthError : undefined} nextPath={typeof params.next === "string" ? params.next : undefined} /></AuthShell>;
 }

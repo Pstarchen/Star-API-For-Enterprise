@@ -8,11 +8,13 @@ export const AUTH_POLICY_SETTING_KEY = "auth-policy";
 export type AuthPolicy = {
   passwordLoginEnabled: boolean;
   registrationEnabled: boolean;
+  registrationEmailVerificationRequired: boolean;
 };
 
 export const defaultAuthPolicy: AuthPolicy = {
   passwordLoginEnabled: true,
   registrationEnabled: true,
+  registrationEmailVerificationRequired: false,
 };
 
 export async function getAuthPolicy(): Promise<AuthPolicy> {
@@ -22,6 +24,7 @@ export async function getAuthPolicy(): Promise<AuthPolicy> {
   return {
     passwordLoginEnabled: value.passwordLoginEnabled !== false,
     registrationEnabled: value.registrationEnabled !== false,
+    registrationEmailVerificationRequired: value.registrationEmailVerificationRequired === true,
   };
 }
 

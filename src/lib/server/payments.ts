@@ -2,6 +2,7 @@ import "server-only";
 
 import { createDecipheriv, createSign, createVerify, randomBytes, sign } from "node:crypto";
 import { Prisma } from "@prisma/client";
+import { queueLowBalanceAlert, queueTenantEventEmail } from "@/lib/server/email-delivery";
 import { prisma } from "@/lib/server/prisma";
 
 export function paymentOrderNo() {
@@ -63,14 +64,105 @@ export async function completePayment(
   amount: Prisma.Decimal,
   context: { actorId?: string; ipAddress?: string | null; note?: string } = {},
 ) {
-  return prisma.$transaction(async (transaction) => {
-    const order = await transaction.paymentOrder.findUnique({ where: { orderNo }, include: { invoice: true } });
-    if (!order || !order.invoice || order.amount.comparedTo(amount) !== 0) throw new Error("PAYMENT_MISMATCH");
-    if (order.status === "PAID") return order;
-    if (order.status !== "PENDING" || order.invoice.status !== "ISSUED") throw new Error("PAYMENT_NOT_PAYABLE");
+  const result = await prisma.$transaction(async (transaction) => {
+    const order = await transaction.paymentOrder.findUnique({ where: { orderNo }, include: { invoice: true, walletEntries: { select: { id: true, balanceAfter: true } } } });
+    if (!order || order.amount.comparedTo(amount) !== 0) throw new Error("PAYMENT_MISMATCH");
+    if (order.status === "PAID") {
+      if (order.orderType === "RECHARGE" && order.walletEntries.length !== 1) throw new Error("PAYMENT_LEDGER_INCONSISTENT");
+      const entry = order.walletEntries[0];
+      return {
+        order,
+        notification: order.orderType === "RECHARGE" && entry
+          ? { tenantId: order.tenantId, entryId: entry.id, amount: order.amount.toFixed(2), balance: entry.balanceAfter.toFixed(2), orderNo: order.orderNo }
+          : null,
+      };
+    }
+    if (order.status !== "PENDING") throw new Error("PAYMENT_NOT_PAYABLE");
     const updated = await transaction.paymentOrder.update({ where: { id: order.id }, data: { status: "PAID", externalTradeNo, paidAt: new Date() } });
-    await transaction.invoice.update({ where: { id: order.invoice.id }, data: { status: "PAID" } });
+    let notification: { tenantId: string; entryId: string; amount: string; balance: string; orderNo: string } | null = null;
+    if (order.orderType === "INVOICE") {
+      if (!order.invoice || order.invoice.status !== "ISSUED") throw new Error("PAYMENT_NOT_PAYABLE");
+      await transaction.invoice.update({ where: { id: order.invoice.id }, data: { status: "PAID" } });
+    } else {
+      const tenant = await transaction.tenant.update({
+        where: { id: order.tenantId },
+        data: { balance: { increment: order.amount } },
+        select: { balance: true },
+      });
+      const entry = await transaction.walletEntry.create({
+        data: {
+          tenantId: order.tenantId,
+          paymentOrderId: order.id,
+          type: "RECHARGE",
+          delta: order.amount,
+          balanceAfter: tenant.balance,
+          reason: order.subject,
+        },
+      });
+      notification = { tenantId: order.tenantId, entryId: entry.id, amount: order.amount.toFixed(2), balance: tenant.balance.toFixed(2), orderNo: order.orderNo };
+    }
     await transaction.auditLog.create({ data: { tenantId: order.tenantId, actorId: context.actorId, action: "payment.completed", resource: "payment-order", resourceId: order.id, metadata: { orderNo, channel: order.channel, externalTradeNo, ...(context.note ? { note: context.note } : {}) }, ipAddress: context.ipAddress } });
-    return updated;
+    return { order: updated, notification };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  if (result.notification) {
+    queueTenantEventEmail({
+      tenantId: result.notification.tenantId,
+      eventId: "recharge-success",
+      dedupeKey: `recharge-success:${result.notification.entryId}`,
+      values: { recharge_amount: result.notification.amount, current_balance: result.notification.balance, order_id: result.notification.orderNo },
+    });
+  }
+  return result.order;
+}
+
+export async function adjustWalletBalance(input: {
+  tenantId: string;
+  type: "ADMIN_RECHARGE" | "ADMIN_REFUND";
+  amount: Prisma.Decimal;
+  reason: string;
+  actorId: string;
+  ipAddress?: string | null;
+}) {
+  if (input.amount.lte(0)) throw new Error("WALLET_AMOUNT_INVALID");
+  const delta = input.type === "ADMIN_RECHARGE" ? input.amount : input.amount.negated();
+  const result = await prisma.$transaction(async (transaction) => {
+    const tenant = await transaction.tenant.findUnique({ where: { id: input.tenantId }, select: { id: true, balance: true } });
+    if (!tenant) throw new Error("TENANT_NOT_FOUND");
+    const nextBalance = tenant.balance.add(delta);
+    if (nextBalance.lt(0)) throw new Error("WALLET_INSUFFICIENT_BALANCE");
+    const updatedTenant = await transaction.tenant.update({ where: { id: tenant.id }, data: { balance: nextBalance }, select: { balance: true } });
+    const entry = await transaction.walletEntry.create({
+      data: {
+        tenantId: tenant.id,
+        actorId: input.actorId,
+        type: input.type,
+        delta,
+        balanceAfter: updatedTenant.balance,
+        reason: input.reason,
+      },
+    });
+    await transaction.auditLog.create({
+      data: {
+        tenantId: tenant.id,
+        actorId: input.actorId,
+        action: input.type === "ADMIN_RECHARGE" ? "wallet.admin_recharge" : "wallet.admin_refund",
+        resource: "wallet",
+        resourceId: entry.id,
+        metadata: { delta: delta.toString(), balanceAfter: updatedTenant.balance.toString(), reason: input.reason },
+        ipAddress: input.ipAddress,
+      },
+    });
+    return { entry, balance: updatedTenant.balance, previousBalance: tenant.balance };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  if (input.type === "ADMIN_RECHARGE") {
+    queueTenantEventEmail({
+      tenantId: input.tenantId,
+      eventId: "recharge-success",
+      dedupeKey: `recharge-success:${result.entry.id}`,
+      values: { recharge_amount: input.amount.toFixed(2), current_balance: result.balance.toFixed(2), order_id: result.entry.id },
+    });
+  } else {
+    queueLowBalanceAlert({ tenantId: input.tenantId, dedupeKey: result.entry.id, previousBalance: result.previousBalance.toString(), currentBalance: result.balance.toString() });
+  }
+  return result;
 }

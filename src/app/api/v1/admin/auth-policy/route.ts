@@ -1,12 +1,14 @@
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/server/auth";
 import { canAdministratorsUseGithubLogin, getAuthPolicy, saveAuthPolicy } from "@/lib/server/auth-policy";
+import { getIntegration } from "@/lib/server/integrations";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 
 const schema = z.object({
   passwordLoginEnabled: z.boolean(),
   registrationEnabled: z.boolean(),
+  registrationEmailVerificationRequired: z.boolean(),
 }).strict();
 
 async function authorizeAdmin() {
@@ -31,6 +33,11 @@ export async function PATCH(request: Request) {
   }
   if (parsed.data.registrationEnabled && !parsed.data.passwordLoginEnabled) {
     return Response.json({ code: 409, message: "开放邮箱注册时必须同时启用邮箱密码登录" }, { status: 409, headers: noStoreHeaders });
+  }
+  if (!parsed.data.registrationEnabled && parsed.data.registrationEmailVerificationRequired) return Response.json({ code: 409, message: "关闭新用户注册时不能继续启用注册邮箱验证" }, { status: 409, headers: noStoreHeaders });
+  if (parsed.data.registrationEmailVerificationRequired) {
+    const smtp = await getIntegration("smtp");
+    if (!smtp.enabled || !smtp.configured) return Response.json({ code: 409, message: "开启注册邮箱验证前，请先启用并完整配置 SMTP 邮件服务" }, { status: 409, headers: noStoreHeaders });
   }
   if (!parsed.data.passwordLoginEnabled && !(await canAdministratorsUseGithubLogin())) {
     return Response.json({ code: 409, message: "关闭邮箱密码登录前，请先启用 GitHub 登录并让至少一名活跃管理员完成账号绑定" }, { status: 409, headers: noStoreHeaders });

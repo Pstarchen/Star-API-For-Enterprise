@@ -119,6 +119,7 @@ enum PaymentChannel {
   ALIPAY
   WECHAT
   BANK_TRANSFER
+  CODE_PAY
 }
 
 enum PaymentOrderStatus {
@@ -127,6 +128,25 @@ enum PaymentOrderStatus {
   CANCELED
   EXPIRED
   REFUNDED
+}
+
+enum PaymentOrderType {
+  INVOICE
+  RECHARGE
+}
+
+enum WalletEntryType {
+  RECHARGE
+  REFUND
+  ADMIN_RECHARGE
+  ADMIN_REFUND
+  API_USAGE
+}
+
+enum EmailDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
 }
 
 model Tenant {
@@ -139,6 +159,8 @@ model Tenant {
   notificationEmail String?
   timezone          String           @default("Asia/Shanghai")
   quotaAlerts       Boolean          @default(true)
+  balanceAlerts     Boolean          @default(true)
+  balance           Decimal          @default(0) @db.Decimal(14, 6)
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   memberships       Membership[]
@@ -148,28 +170,35 @@ model Tenant {
   auditLogs         AuditLog[]
   providers         Provider[]
   apiAccessGrants   ApiAccessGrant[]
+  walletEntries     WalletEntry[]
+  emailActionTokens EmailActionToken[]
+  emailDeliveries   EmailDelivery[]
 
   @@index([status, createdAt])
 }
 
 model User {
-  id              String         @id @default(cuid())
-  email           String         @unique
-  name            String
-  accountType     AccountType    @default(PERSONAL)
-  platformRole    PlatformRole   @default(USER)
-  status          UserStatus     @default(ACTIVE)
-  passwordHash    String?
-  emailVerifiedAt DateTime?
-  mfaEnabled      Boolean        @default(false)
-  lastLoginAt     DateTime?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-  memberships     Membership[]
-  sessions        Session[]
-  oauthAccounts   OAuthAccount[]
-  auditLogs       AuditLog[]     @relation("AuditActor")
-  apiAudits       ApiAudit[]     @relation("ApiAuditReviewer")
+  id                        String                   @id @default(cuid())
+  email                     String                   @unique
+  name                      String
+  accountType               AccountType              @default(PERSONAL)
+  platformRole              PlatformRole             @default(USER)
+  status                    UserStatus               @default(ACTIVE)
+  passwordHash              String?
+  emailVerifiedAt           DateTime?
+  emailVerificationRequired Boolean                  @default(false)
+  mfaEnabled                Boolean                  @default(false)
+  lastLoginAt               DateTime?
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
+  memberships               Membership[]
+  sessions                  Session[]
+  oauthAccounts             OAuthAccount[]
+  emailVerificationTokens   EmailVerificationToken[]
+  emailActionTokens         EmailActionToken[]
+  auditLogs                 AuditLog[]               @relation("AuditActor")
+  apiAudits                 ApiAudit[]               @relation("ApiAuditReviewer")
+  walletActions             WalletEntry[]            @relation("WalletActor")
 
   @@index([platformRole, status])
 }
@@ -197,6 +226,55 @@ model OAuthState {
   createdAt    DateTime @default(now())
 
   @@index([provider, expiresAt])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([expiresAt])
+}
+
+model EmailActionToken {
+  id          String    @id @default(cuid())
+  purpose     String
+  userId      String?
+  tenantId    String?
+  tokenHash   String    @unique
+  targetEmail String?
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+  user        User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([purpose, userId, expiresAt])
+  @@index([purpose, tenantId, expiresAt])
+  @@index([expiresAt])
+}
+
+model EmailDelivery {
+  id             String              @id @default(cuid())
+  tenantId       String
+  eventId        String
+  dedupeKey      String              @unique
+  recipientEmail String
+  status         EmailDeliveryStatus @default(PENDING)
+  attempts       Int                 @default(1)
+  lastError      String?
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  tenant         Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([status, updatedAt])
 }
 
 model Session {
@@ -550,6 +628,7 @@ model RequestLog {
   apiKey        ApiKey?     @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
   product       ApiProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
   endpoint      Endpoint?   @relation(fields: [endpointId], references: [id], onDelete: SetNull)
+  walletEntry   WalletEntry?
 
   @@index([appId, occurredAt(sort: Desc)])
   @@index([productId, occurredAt(sort: Desc)])
@@ -562,6 +641,7 @@ model PaymentOrder {
   orderNo         String             @unique
   tenantId        String
   invoiceId       String?
+  orderType       PaymentOrderType   @default(INVOICE)
   channel         PaymentChannel
   status          PaymentOrderStatus @default(PENDING)
   amount          Decimal            @db.Decimal(14, 2)
@@ -574,10 +654,31 @@ model PaymentOrder {
   updatedAt       DateTime           @updatedAt
   tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   invoice         Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  walletEntries   WalletEntry[]
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([invoiceId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+}
+
+model WalletEntry {
+  id             String          @id @default(cuid())
+  tenantId       String
+  paymentOrderId String?         @unique
+  requestLogId   String?         @unique
+  actorId        String?
+  type           WalletEntryType
+  delta          Decimal         @db.Decimal(14, 6)
+  balanceAfter   Decimal         @db.Decimal(14, 6)
+  reason         String
+  createdAt      DateTime        @default(now())
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  paymentOrder   PaymentOrder?   @relation(fields: [paymentOrderId], references: [id], onDelete: SetNull)
+  requestLog     RequestLog?     @relation(fields: [requestLogId], references: [id], onDelete: SetNull)
+  actor          User?           @relation("WalletActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([type, createdAt(sort: Desc)])
 }
 
 model Invoice {

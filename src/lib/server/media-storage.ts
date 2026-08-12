@@ -4,6 +4,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
 import { basename, extname, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
+import { detectImageSignature } from "@/lib/image-signature";
 
 const DEFAULT_MAX_API_GB = 100;
 const MAX_MEDIA_FILES = 10_000;
@@ -55,11 +56,9 @@ async function detectedMedia(path: string, extension: string, kind: MediaKind) {
   const bytes = await fileHeader(path);
   const ascii = (start: number, end: number) => bytes.subarray(start, end).toString("ascii");
   if (kind === "IMAGE") {
-    if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 && extension === ".png") return "image/png";
-    if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff && [".jpg", ".jpeg"].includes(extension)) return "image/jpeg";
-    if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP" && extension === ".webp") return "image/webp";
-    if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(ascii(0, 6)) && extension === ".gif") return "image/gif";
-    throw new Error("UNSUPPORTED_IMAGE");
+    const signature = detectImageSignature(bytes);
+    if (!signature) throw new Error("UNSUPPORTED_IMAGE");
+    return signature;
   }
   if (bytes.length >= 12 && ascii(4, 8) === "ftyp" && [".mp4", ".m4v", ".mov"].includes(extension)) return extension === ".mov" ? "video/quicktime" : "video/mp4";
   if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3 && [".webm", ".mkv"].includes(extension)) return extension === ".mkv" ? "video/x-matroska" : "video/webm";
@@ -79,8 +78,6 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
   await Promise.all([mkdir(productDirectory, { recursive: true }), mkdir(temporaryDirectory, { recursive: true })]);
   const id = crypto.randomUUID();
   const temporaryPath = resolve(temporaryDirectory, `${id}.upload`);
-  const storageKey = `${input.productId}/${id}${extension}`;
-  const finalPath = storedPath(storageKey);
   const file = await open(temporaryPath, "wx", 0o600);
   let size = BigInt(0);
   try {
@@ -105,15 +102,18 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
     await unlink(temporaryPath).catch(() => undefined);
     throw new Error("EMPTY_MEDIA");
   }
-  let mimeType: string;
   try {
-    mimeType = await detectedMedia(temporaryPath, extension, input.kind);
+    const detected = await detectedMedia(temporaryPath, extension, input.kind);
+    const mimeType = typeof detected === "string" ? detected : detected.mimeType;
+    const storageExtension = typeof detected === "string" ? extension : detected.extension;
+    const storageKey = `${input.productId}/${id}${storageExtension}`;
+    const finalPath = storedPath(storageKey);
     await rename(temporaryPath, finalPath);
+    return { storageKey, name, mimeType, size, kind: input.kind } satisfies StoredMedia;
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
     throw error;
   }
-  return { storageKey, name, mimeType, size, kind: input.kind } satisfies StoredMedia;
 }
 
 export async function removeStoredMedia(storageKey: string | null | undefined) {

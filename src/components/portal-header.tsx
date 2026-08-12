@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BookOpen, Boxes, ChevronDown, CreditCard, Home, LayoutDashboard, LogOut, Menu, Settings, ShieldCheck, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BrandMark } from "./brand-mark";
 import { StatusRail, type GatewayStatus } from "./status-rail";
 import { ThemeToggle } from "./theme-toggle";
@@ -23,12 +23,41 @@ const links = [
 
 type PortalUser = { name: string; email: string; platformRole: "USER" | "ADMIN" };
 
-export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: PortalUser | null; gatewayStatus: GatewayStatus }) {
+export function PortalHeader({ currentUser, gatewayStatus, overlay = false }: { currentUser: PortalUser | null; gatewayStatus: GatewayStatus; overlay?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [scrollState, setScrollState] = useState<"top" | "down" | "up">("top");
+  const lastScrollY = useRef(0);
+  const scrollFrame = useRef<number | null>(null);
   const initials = currentUser?.name.slice(0, 1).toUpperCase();
+
+  useEffect(() => {
+    lastScrollY.current = window.scrollY;
+
+    function updateScrollState() {
+      const currentScrollY = Math.max(window.scrollY, 0);
+      const delta = currentScrollY - lastScrollY.current;
+
+      if (currentScrollY < 18) setScrollState("top");
+      else if (delta > 4) setScrollState("down");
+      else if (delta < -4) setScrollState("up");
+
+      lastScrollY.current = currentScrollY;
+      scrollFrame.current = null;
+    }
+
+    function handleScroll() {
+      if (scrollFrame.current == null) scrollFrame.current = window.requestAnimationFrame(updateScrollState);
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", handleScroll);
+      if (scrollFrame.current != null) window.cancelAnimationFrame(scrollFrame.current);
+    };
+  }, []);
 
   async function logout() {
     setLoggingOut(true);
@@ -39,17 +68,18 @@ export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: Port
   }
 
   return <TooltipProvider delayDuration={350}>
-    <header className="sticky top-0 z-40">
+    <header className={cn("portal-header sticky top-0 z-40", overlay && "is-overlay")} data-scroll-state={scrollState}>
       <StatusRail status={gatewayStatus} />
       <div className="portal-bar">
-        <div className="container-shell portal-nav flex h-14 items-center gap-6">
-          <BrandMark />
-          <nav className="hidden h-full items-center gap-0.5 md:flex" aria-label="主导航">{links.map((item) => {
+        <div className="container-shell portal-nav">
+          <div className="portal-island portal-brand-island hidden lg:flex"><BrandMark /></div>
+
+          <nav className="portal-island portal-links-island hidden items-center gap-0.5 lg:flex" aria-label="主导航">{links.map((item) => {
             const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
             return <Link key={item.href} href={item.href} className={cn("portal-nav-link", active && "is-active")}>{item.label}</Link>;
           })}</nav>
 
-          <div className="relative ml-auto hidden items-center gap-2 sm:flex">
+          <div className="portal-island portal-actions-island relative hidden items-center gap-2 lg:flex">
             <Tooltip><TooltipTrigger asChild><ThemeToggle className="grid size-9 place-items-center rounded-[7px] text-[var(--muted)] transition hover:bg-[var(--surface-subtle)] hover:text-[var(--ink)]" /></TooltipTrigger><TooltipContent>切换深浅色模式</TooltipContent></Tooltip>
             {currentUser ? <DropdownMenu>
               <DropdownMenuTrigger asChild><button type="button" className="portal-account-trigger"><Avatar className="size-7"><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong>{currentUser.name}</strong><small>{currentUser.platformRole === "ADMIN" ? "平台管理员" : "开发者账号"}</small></span><ChevronDown className="size-3.5 shrink-0 text-[var(--muted)]" /></button></DropdownMenuTrigger>
@@ -57,10 +87,13 @@ export function PortalHeader({ currentUser, gatewayStatus }: { currentUser: Port
             </DropdownMenu> : <><Button asChild variant="ghost" size="sm" className="ml-1"><Link href="/login">登录</Link></Button><Button asChild size="sm"><Link href="/register">免费注册</Link></Button></>}
           </div>
 
-          <Button type="button" variant="ghost" size="icon" className="ml-auto md:hidden" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "关闭导航菜单" : "打开导航菜单"}>{open ? <X /> : <Menu />}</Button>
+          <div className="portal-island portal-mobile-island flex items-center lg:hidden">
+            <BrandMark />
+            <Button type="button" variant="ghost" size="icon" className="ml-auto" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "关闭导航菜单" : "打开导航菜单"}>{open ? <X /> : <Menu />}</Button>
+          </div>
         </div>
 
-        {open && <nav className="portal-mobile-menu container-shell grid gap-1 py-3 md:hidden" aria-label="移动端主导航">{links.map((item) => {
+        {open && <nav className="portal-mobile-menu container-shell grid gap-1 py-3 lg:hidden" aria-label="移动端主导航">{links.map((item) => {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           return <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className={cn("flex h-11 items-center gap-3 rounded-[7px] px-3 text-sm font-medium transition hover:bg-[var(--surface-subtle)]", active && "bg-[var(--brand-soft)] text-[var(--brand-strong)]")}><item.icon className="size-4" />{item.label}</Link>;
         })}{currentUser ? <div className="mt-2 border-t border-[var(--line)] pt-3"><div className="flex items-center gap-2 px-2 pb-2"><Avatar><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong className="block truncate text-xs">{currentUser.name}</strong><small className="block truncate text-[11px] text-[var(--muted)]">{currentUser.email}</small></span><ThemeToggle className="ml-auto grid size-9 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /></div><div className="grid grid-cols-2 gap-1"><MobileAccountLink href="/console" icon={LayoutDashboard} label="控制台" close={() => setOpen(false)} />{currentUser.platformRole === "ADMIN" && <MobileAccountLink href="/admin" icon={ShieldCheck} label="运营后台" close={() => setOpen(false)} />}<MobileAccountLink href="/console/settings" icon={Settings} label="账号设置" close={() => setOpen(false)} /><button type="button" onClick={logout} disabled={loggingOut} className="flex h-10 items-center gap-2 rounded-[7px] px-2 text-left text-xs text-[var(--danger)] transition hover:bg-[var(--danger-soft)] disabled:opacity-50"><LogOut className="size-3.5" />退出登录</button></div></div> : <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-3"><ThemeToggle className="grid size-10 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /><Button asChild variant="secondary" className="flex-1"><Link href="/login" onClick={() => setOpen(false)}>登录</Link></Button><Button asChild className="flex-1"><Link href="/register" onClick={() => setOpen(false)}>免费注册</Link></Button></div>}</nav>}

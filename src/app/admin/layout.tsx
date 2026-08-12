@@ -8,7 +8,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
   const [pendingApis, pendingProviders, pendingPayments, blocked] = await Promise.all([
     prisma.apiProduct.count({ where: { status: { in: ["DRAFT", "REVIEW"] } } }),
     prisma.provider.count({ where: { verifiedAt: null } }),
-    prisma.paymentOrder.count({ where: { channel: "BANK_TRANSFER", status: "PENDING" } }),
+    prisma.paymentOrder.count({ where: { channel: { in: ["BANK_TRANSFER", "CODE_PAY"] }, status: "PENDING" } }),
     prisma.authThrottle.count({ where: { blockedUntil: { gt: new Date() } } }),
   ]);
   const nav: WorkspaceNavItem[] = [
@@ -28,6 +28,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     ] },
     { href: "/admin/payments", label: "财务与风控", icon: "billing", ...((pendingPayments + blocked) ? { badge: String(pendingPayments + blocked) } : {}), items: [
       { href: "/admin/payments", label: "支付订单", icon: "billing" },
+      { href: "/admin/wallet", label: "余额与退款", icon: "billing" },
       { href: "/admin/risk", label: "风控中心", icon: "risk" },
     ] },
     { href: "/admin/settings", label: "平台设置", icon: "settings", items: [

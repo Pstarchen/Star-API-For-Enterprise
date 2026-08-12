@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { connection } from "next/server";
+import { AppLaunch } from "@/components/app-launch";
 import { BrandingProvider } from "@/components/branding-provider";
 import { platformIconUrl } from "@/lib/platform";
 import { getPlatformConfig } from "@/lib/server/installation";
@@ -23,7 +24,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       <head>
         <script dangerouslySetInnerHTML={{ __html: `try{const t=localStorage.getItem("star-api-theme");const s=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";document.documentElement.dataset.theme=t||s;document.documentElement.style.colorScheme=t||s}catch{}` }} />
       </head>
-      <body><BrandingProvider config={config}>{children}</BrandingProvider></body>
+      <body><AppLaunch config={config} /><BrandingProvider config={config}>{children}</BrandingProvider></body>
     </html>
   );
 }

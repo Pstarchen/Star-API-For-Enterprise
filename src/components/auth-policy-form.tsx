@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, LockKeyhole, Save, UserPlus } from "lucide-react";
+import { CheckCircle2, Loader2, LockKeyhole, MailCheck, Save, UserPlus } from "lucide-react";
 import { useState } from "react";
 import type { AuthPolicy } from "@/lib/server/auth-policy";
 import { Button } from "./ui/button";
@@ -58,7 +58,15 @@ export function AuthPolicyForm({ initial }: { initial: AuthPolicy }) {
           description="允许个人与企业用户创建账号，也控制 GitHub 首次登录自动创建新账号。"
           checked={policy.registrationEnabled}
           disabled={!policy.passwordLoginEnabled}
-          onChange={(checked) => setPolicy((value) => ({ ...value, registrationEnabled: checked }))}
+          onChange={(checked) => setPolicy((value) => ({ ...value, registrationEnabled: checked, registrationEmailVerificationRequired: checked ? value.registrationEmailVerificationRequired : false }))}
+        />
+        <PolicyToggle
+          icon={MailCheck}
+          title="注册必须验证邮箱"
+          description="新用户提交注册后先发送验证邮件，验证完成前不能创建登录会话；需要先配置并启用 SMTP。"
+          checked={policy.registrationEmailVerificationRequired}
+          disabled={!policy.registrationEnabled}
+          onChange={(checked) => setPolicy((value) => ({ ...value, registrationEmailVerificationRequired: checked }))}
         />
         {error && <FormMessage className="mx-5 mb-4">{error}</FormMessage>}
         <div className="flex items-center justify-end gap-3 border-t border-[var(--line)] px-5 py-4">

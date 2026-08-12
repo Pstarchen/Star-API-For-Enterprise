@@ -20,8 +20,8 @@ export async function PATCH(request: Request) {
 
   const order = await prisma.paymentOrder.findUnique({ where: { id: parsed.data.id } });
   if (!order) return Response.json({ code: 404, message: "支付订单不存在" }, { status: 404, headers: noStoreHeaders });
-  if (order.channel !== "BANK_TRANSFER") return Response.json({ code: 409, message: "线上支付订单由支付回调自动确认" }, { status: 409, headers: noStoreHeaders });
-  if (order.status !== "PENDING") return Response.json({ code: 409, message: "仅待支付的对公转账订单可以核销" }, { status: 409, headers: noStoreHeaders });
+  if (order.channel !== "BANK_TRANSFER" && order.channel !== "CODE_PAY") return Response.json({ code: 409, message: "线上支付订单由支付回调自动确认" }, { status: 409, headers: noStoreHeaders });
+  if (order.status !== "PENDING") return Response.json({ code: 409, message: "仅待支付的转账或码支付订单可以核验" }, { status: 409, headers: noStoreHeaders });
 
   try {
     const updated = await completePayment(order.orderNo, parsed.data.reference, new Prisma.Decimal(order.amount), {

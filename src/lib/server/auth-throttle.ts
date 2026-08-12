@@ -5,9 +5,14 @@ import { prisma } from "@/lib/server/prisma";
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 6;
+const EMAIL_MAX_ATTEMPTS = 3;
 
 function keyFor(email: string, ipAddress: string | null) {
   return hashAuthIdentifier(`${email}:${ipAddress ?? "unknown"}`);
+}
+
+function emailVerificationKey(email: string, ipAddress: string | null) {
+  return hashAuthIdentifier(`email-verification:${email}:${ipAddress ?? "unknown"}`);
 }
 
 export async function checkLoginThrottle(email: string, ipAddress: string | null) {
@@ -43,4 +48,21 @@ export async function recordFailedLogin(email: string, ipAddress: string | null)
 
 export async function clearLoginThrottle(email: string, ipAddress: string | null) {
   await prisma.authThrottle.deleteMany({ where: { key: keyFor(email, ipAddress) } });
+}
+
+export async function checkEmailVerificationThrottle(email: string, ipAddress: string | null) {
+  const record = await prisma.authThrottle.findUnique({ where: { key: emailVerificationKey(email, ipAddress) } });
+  return Boolean(record?.blockedUntil && record.blockedUntil > new Date());
+}
+
+export async function recordEmailVerificationRequest(email: string, ipAddress: string | null) {
+  const key = emailVerificationKey(email, ipAddress);
+  const now = new Date();
+  const record = await prisma.authThrottle.findUnique({ where: { key } });
+  if (!record || now.getTime() - record.windowStartedAt.getTime() >= WINDOW_MS) {
+    await prisma.authThrottle.upsert({ where: { key }, create: { key, attempts: 1, windowStartedAt: now }, update: { attempts: 1, windowStartedAt: now, blockedUntil: null } });
+    return;
+  }
+  const attempts = record.attempts + 1;
+  await prisma.authThrottle.update({ where: { key }, data: { attempts, blockedUntil: attempts >= EMAIL_MAX_ATTEMPTS ? new Date(now.getTime() + WINDOW_MS) : null } });
 }

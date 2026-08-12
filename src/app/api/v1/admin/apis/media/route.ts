@@ -22,7 +22,7 @@ function uploadError(error: unknown) {
   const messages: Record<string, string> = {
     MEDIA_API_LIMIT: `单个 API 的媒体总量不能超过 ${Number(limits.maxApiBytes / BigInt(1024 ** 3))} GB`,
     MEDIA_FILE_LIMIT: `单个 API 最多保存 ${limits.maxFiles.toLocaleString("zh-CN")} 个媒体文件`,
-    UNSUPPORTED_IMAGE: "图片内容与扩展名不匹配，仅支持 PNG、JPEG、WebP 或 GIF",
+    UNSUPPORTED_IMAGE: "无法识别图片内容，仅支持真实的 PNG、JPEG、WebP 或 GIF",
     UNSUPPORTED_VIDEO: "视频内容与扩展名不匹配，仅支持 MP4、M4V、WebM、MOV、MKV 或 AVI",
     EMPTY_MEDIA: "媒体文件不能为空",
   };

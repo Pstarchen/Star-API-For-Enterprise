@@ -6,6 +6,7 @@ import { authenticateApiKey } from "@/lib/server/api-key";
 import { contentResponse } from "@/lib/server/api-assets";
 import { decryptJson } from "@/lib/server/encryption";
 import { executeInternalHandler } from "@/lib/server/internal-handlers";
+import { queueLowBalanceAlert, queueQuotaAlert } from "@/lib/server/email-delivery";
 import { prisma } from "@/lib/server/prisma";
 import { executePhpPackage } from "@/lib/server/php-runner";
 import { consumeRateLimit } from "@/lib/server/redis";
@@ -27,6 +28,11 @@ function bearerToken(request: Request) {
 function monthStart() {
   const now = new Date();
   return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+}
+
+function monthPeriod() {
+  const start = monthStart();
+  return `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function dayStart() {
@@ -169,8 +175,13 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
   if ((product.visibility === "GRAY" || product.status === "GRAY") && (apiKey.app.environment !== "TEST" || !granted)) return jsonError(403, "GRAY_API_DENIED", "该接口仅向已授权测试应用开放", requestId);
   const subscription = await prisma.subscription.findUnique({ where: { appId_productId: { appId: apiKey.appId, productId: product.id } } });
   if (!subscription || subscription.status !== "ACTIVE") return jsonError(403, "SUBSCRIPTION_REQUIRED", "应用尚未订阅该接口", requestId);
-  const usedThisMonth = await prisma.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() } } });
+  const [usedThisMonth, successfulUsage] = await Promise.all([
+    prisma.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() } } }),
+    prisma.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } }),
+  ]);
   if (subscription.quotaMonthly > BigInt(0) && BigInt(usedThisMonth) >= subscription.quotaMonthly) return jsonError(429, "MONTHLY_QUOTA_EXCEEDED", "本月调用配额已用尽", requestId);
+  const chargeableOnSuccess = product.billingMode === "PER_REQUEST" && BigInt(successfulUsage) >= product.freeQuotaMonthly && subscription.unitPrice.gt(0);
+  if (chargeableOnSuccess && apiKey.app.tenant.balance.lt(subscription.unitPrice)) return jsonError(402, "INSUFFICIENT_BALANCE", "账户余额不足，请充值后重试", requestId);
   if (endpoint.dailyLimit > BigInt(0)) {
     const usedToday = await prisma.requestLog.count({ where: { appId: apiKey.appId, endpointId: endpoint.id, occurredAt: { gte: dayStart() } } });
     if (BigInt(usedToday) >= endpoint.dailyLimit) return jsonError(429, "DAILY_LIMIT_EXCEEDED", "该接口今日调用上限已用尽", requestId);
@@ -239,14 +250,36 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
 
   const success = statusCode >= 200 && statusCode < 400;
   const billableUnits = success ? BigInt(1) : BigInt(0);
-  const successfulUsage = success ? await prisma.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } }) : 0;
   const isChargeable = success && product.billingMode === "PER_REQUEST" && BigInt(successfulUsage) >= product.freeQuotaMonthly;
   const amount = isChargeable ? subscription.unitPrice : new Prisma.Decimal(0);
-  await prisma.requestLog.create({ data: { id: requestId, appId: apiKey.appId, apiKeyId: apiKey.id, productId: product.id, endpointId: endpoint.id, method: request.method, path: endpoint.requestLogging ? publicPath : "[redacted]", statusCode, latencyMs: Date.now() - startedAt, region: request.headers.get("x-star-region")?.slice(0, 48) || "default", billableUnits, amount, responseBytes, errorCode, billed: isChargeable } });
+  const usage = await prisma.$transaction(async (transaction) => {
+    let previousBalance: Prisma.Decimal | null = null;
+    let currentBalance: Prisma.Decimal | null = null;
+    let charged = isChargeable && amount.gt(0);
+    if (charged) {
+      const tenant = await transaction.tenant.findUnique({ where: { id: apiKey.app.tenantId }, select: { balance: true } });
+      if (!tenant) throw new Error("TENANT_NOT_FOUND");
+      previousBalance = tenant.balance;
+      const updated = await transaction.tenant.updateMany({ where: { id: apiKey.app.tenantId, balance: { gte: amount } }, data: { balance: { decrement: amount } } });
+      if (updated.count !== 1) charged = false;
+      else currentBalance = tenant.balance.sub(amount);
+    }
+    const finalStatus = isChargeable && amount.gt(0) && !charged ? 402 : statusCode;
+    const finalError = finalStatus === 402 ? "INSUFFICIENT_BALANCE" : errorCode;
+    const log = await transaction.requestLog.create({ data: { id: requestId, appId: apiKey.appId, apiKeyId: apiKey.id, productId: product.id, endpointId: endpoint.id, method: request.method, path: endpoint.requestLogging ? publicPath : "[redacted]", statusCode: finalStatus, latencyMs: Date.now() - startedAt, region: request.headers.get("x-star-region")?.slice(0, 48) || "default", billableUnits: finalStatus === 402 ? BigInt(0) : billableUnits, amount: charged ? amount : new Prisma.Decimal(0), responseBytes: finalStatus === 402 ? BigInt(0) : responseBytes, errorCode: finalError, billed: charged } });
+    if (charged && currentBalance) await transaction.walletEntry.create({ data: { tenantId: apiKey.app.tenantId, requestLogId: log.id, type: "API_USAGE", delta: amount.negated(), balanceAfter: currentBalance, reason: `${product.name} API 调用` } });
+    return { insufficient: finalStatus === 402, previousBalance, currentBalance };
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+  if (usage.insufficient) {
+    response = jsonError(402, "INSUFFICIENT_BALANCE", "账户余额不足，请充值后重试", requestId);
+    statusCode = 402;
+  }
+  if (usage.previousBalance && usage.currentBalance) queueLowBalanceAlert({ tenantId: apiKey.app.tenantId, dedupeKey: requestId, previousBalance: usage.previousBalance.toString(), currentBalance: usage.currentBalance.toString() });
+  queueQuotaAlert({ tenantId: apiKey.app.tenantId, subscriptionId: subscription.id, appId: apiKey.appId, appName: apiKey.app.name, usedBefore: BigInt(usedThisMonth), usedAfter: BigInt(usedThisMonth + 1), quota: subscription.quotaMonthly, period: monthPeriod() });
   response.headers.set("Cache-Control", "no-store");
   response.headers.set("X-Star-Request-Id", requestId);
-  response.headers.set("X-Billable-Units", billableUnits.toString());
-  response.headers.set("X-Request-Cost", amount.toString());
+  response.headers.set("X-Billable-Units", usage.insufficient ? "0" : billableUnits.toString());
+  response.headers.set("X-Request-Cost", usage.insufficient ? "0" : amount.toString());
   if (endpoint.corsEnabled) for (const [key, value] of Object.entries(corsHeaders(request.headers.get("origin")))) response.headers.set(key, value);
   return response;
 }

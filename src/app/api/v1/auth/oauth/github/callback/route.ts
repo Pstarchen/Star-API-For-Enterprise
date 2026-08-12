@@ -1,11 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { createHash } from "node:crypto";
+import { absoluteOAuthUrl, GITHUB_OAUTH_CALLBACK_PATH, OAUTH_FRONTEND_CALLBACK_PATH } from "@/lib/oauth";
 import { createSession } from "@/lib/server/auth";
+import { getAuthPolicy } from "@/lib/server/auth-policy";
 import { getIntegration } from "@/lib/server/integrations";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
 import { requestIp } from "@/lib/server/request";
-import { getAuthPolicy } from "@/lib/server/auth-policy";
 
 type GitHubProfile = { id: number; login: string; name: string | null };
 type GitHubEmail = { email: string; primary: boolean; verified: boolean };
@@ -23,11 +24,12 @@ export async function GET(request: Request) {
   await prisma.oAuthState.delete({ where: { id: stateRecord.id } });
 
   const github = await getIntegration("github", true);
-  const clientId = typeof github.publicConfig.clientId === "string" ? github.publicConfig.clientId : "";
+  const clientId = typeof github.publicConfig.clientId === "string" ? github.publicConfig.clientId.trim() : "";
   const clientSecret = typeof github.secrets.clientSecret === "string" ? github.secrets.clientSecret : "";
   if (!github.enabled || !clientId || !clientSecret) return loginError(request, "github_not_configured");
   const platform = await getPlatformConfig();
-  const redirectUri = `${platform.publicUrl.replace(/\/+$/, "")}/api/v1/auth/github/callback`;
+  const publicUrl = platform.publicUrl || new URL(request.url).origin;
+  const redirectUri = absoluteOAuthUrl(publicUrl, GITHUB_OAUTH_CALLBACK_PATH);
 
   try {
     const tokenResponse = await fetch("https://github.com/login/oauth/access_token", { method: "POST", headers: { Accept: "application/json", "Content-Type": "application/json" }, body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: redirectUri }), cache: "no-store" });
@@ -57,13 +59,20 @@ export async function GET(request: Request) {
         target = await transaction.user.create({ data: { email: normalizedEmail, name: profile.name?.trim() || profile.login, accountType: "PERSONAL", emailVerifiedAt: new Date(), lastLoginAt: new Date() } });
         const tenant = await transaction.tenant.create({ data: { name: `${target.name}的个人空间`, type: "PERSONAL", status: "ACTIVE" } });
         await transaction.membership.create({ data: { userId: target.id, tenantId: tenant.id, role: "OWNER" } });
+      } else if (!target.emailVerifiedAt) {
+        target = await transaction.user.update({ where: { id: target.id }, data: { emailVerifiedAt: new Date(), emailVerificationRequired: false } });
       }
       await transaction.oAuthAccount.create({ data: { userId: target.id, provider: "github", providerAccountId: String(profile.id), username: profile.login } });
       await transaction.auditLog.create({ data: { actorId: target.id, action: "auth.github.link", resource: "user", resourceId: target.id, ipAddress: requestIp(request), metadata: { githubUsername: profile.login } } });
       return target;
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
     await createSession(user.id, true);
-    return Response.redirect(new URL(user.platformRole === "ADMIN" && stateRecord.redirectPath === "/console" ? "/admin" : stateRecord.redirectPath, platform.publicUrl));
+    const destination = user.platformRole === "ADMIN" && stateRecord.redirectPath === "/console" ? "/admin" : stateRecord.redirectPath;
+    const completionUrl = new URL(absoluteOAuthUrl(publicUrl, OAUTH_FRONTEND_CALLBACK_PATH));
+    completionUrl.searchParams.set("provider", "github");
+    completionUrl.searchParams.set("next", destination);
+    return Response.redirect(completionUrl);
   } catch (error) {
     if (error instanceof Error && error.message === "ACCOUNT_SUSPENDED") return loginError(request, "account_suspended");
     if (error instanceof Error && error.message === "REGISTRATION_DISABLED") return loginError(request, "registration_disabled");
