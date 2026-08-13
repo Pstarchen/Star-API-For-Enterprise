@@ -95,7 +95,13 @@ docker compose --env-file .env.production -f compose.production.yml exec app nod
 
 ### 推荐：服务器更新器
 
-仓库提供服务器侧更新器。它不会把 Docker Socket 暴露给网站，也不会读取或显示环境文件中的密钥。更新器会检查最新稳定 Git 标签及三套镜像，创建 PostgreSQL、媒体卷和密钥卷备份，再修改 `STAR_API_VERSION`、执行迁移并验证健康接口中的版本号和数据库状态。
+仓库提供服务器侧更新器。它不会把 Docker Socket 暴露给网站，也不会读取或显示环境文件中的密钥。更新器从 GHCR 镜像标签中发现最新稳定 `X.Y.Z` 版本，不依赖服务器访问 GitHub；随后校验 App、迁移器和 PHP Runner 三套同版本镜像，创建 PostgreSQL、媒体卷、密钥卷、环境和 Compose 备份，再修改 `STAR_API_VERSION`、执行迁移并验证健康接口中的版本号和数据库状态。远程查询和镜像拉取均具有超时与重试边界。
+
+服务器需安装 Bash、curl、jq、GNU coreutils（提供 `timeout`）、flock 和 Docker Compose v2。Debian/Ubuntu 可执行：
+
+```bash
+apt-get update && apt-get install -y bash curl jq coreutils util-linux
+```
 
 ```bash
 cd /opt/Star-API-For-Enterprise
@@ -141,7 +147,7 @@ Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷
 
 ### GitHub Actions 受保护部署
 
-仓库提供 `Deploy production` 手动工作流。它只接受 SSH 私钥，不接受明文密码；服务器不需要向网站容器暴露 Docker Socket。先在 GitHub 仓库的 `Settings -> Environments` 创建 `production` 环境，按需设置审批人和受保护分支，再配置：
+仓库提供 `Deploy production` 手动工作流。它只接受 SSH 私钥，不接受明文密码；服务器不需要向网站容器暴露 Docker Socket，也不需要访问 GitHub。Runner 会从已校验的目标标签提取 Compose，再将 Compose 和更新器传入服务器；服务器只需能从 GHCR 拉取镜像。先在 GitHub 仓库的 `Settings -> Environments` 创建 `production` 环境，按需设置审批人和受保护分支，再配置：
 
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
@@ -158,8 +164,8 @@ Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷
 在仓库 `Actions -> Deploy production -> Run workflow` 中填写不带 `v` 的稳定版本，并输入 `DEPLOY` 确认。工作流会依次执行：
 
 1. 校验版本标签、SSH 配置和部署路径。
-2. 使用固定主机指纹建立 SSH 连接，拒绝有本地改动的生产工作树。
-3. 检出目标标签，调用 `scripts/update-production.sh` 创建备份、拉取镜像、执行迁移并更新容器。
+2. 使用固定主机指纹建立 SSH 连接，从目标标签提取并传输版本化 Compose 与受审更新器。
+3. 更新器创建数据库、媒体、密钥、环境文件和当前 Compose 备份，带重试地拉取镜像、执行迁移并更新容器。
 4. 验证 PostgreSQL、Redis、App 和 PHP Runner 都在运行，且内外健康接口的版本号和数据库状态正确。
 
 ## 6. 回滚边界

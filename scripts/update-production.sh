@@ -4,10 +4,11 @@ set -Eeuo pipefail
 umask 077
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-project_dir="$(cd -- "$script_dir/.." && pwd)"
+project_dir="${STAR_API_PROJECT_DIR:-$(cd -- "$script_dir/.." && pwd)}"
+project_dir="$(cd -- "$project_dir" && pwd)"
 env_file="${STAR_API_ENV_FILE:-$project_dir/.env.production}"
 compose_file="${STAR_API_COMPOSE_FILE:-$project_dir/compose.production.yml}"
-repository="${STAR_API_REPOSITORY:-https://github.com/Pstarchen/Star-API-For-Enterprise.git}"
+next_compose_file="${STAR_API_NEXT_COMPOSE_FILE:-}"
 mode="update"
 
 usage() {
@@ -23,11 +24,18 @@ if [[ "${1:-}" == "--check" ]]; then mode="check"; shift; fi
 if [[ $# -gt 1 ]]; then usage >&2; exit 2; fi
 requested_version="${1:-latest}"
 
-for command in awk chmod cp curl date docker flock git grep head mkdir mv rm sed seq sleep sort tail tar tr; do
+for command in awk chmod cp curl date docker flock grep head jq mkdir mv rm sed seq sleep sort tail tar timeout tr; do
   command -v "$command" >/dev/null 2>&1 || { echo "Required command is missing: $command" >&2; exit 1; }
 done
 [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
 [[ -f "$compose_file" ]] || { echo "Compose file not found: $compose_file" >&2; exit 1; }
+if [[ -n "$next_compose_file" ]]; then
+  [[ -f "$next_compose_file" ]] || { echo "Next Compose file not found: $next_compose_file" >&2; exit 1; }
+  [[ "$(cd -- "$(dirname -- "$next_compose_file")" && pwd)/$(basename -- "$next_compose_file")" != "$compose_file" ]] || {
+    echo "STAR_API_NEXT_COMPOSE_FILE must differ from the active Compose file." >&2
+    exit 1
+  }
+fi
 docker compose version >/dev/null
 
 exec 9>"$project_dir/.star-api-update.lock"
@@ -38,33 +46,90 @@ env_value() {
   sed -n "s/^${key}=//p" "$env_file" | tail -n 1 | tr -d '\r'
 }
 
-stable_versions() {
-  git ls-remote --tags --refs "$repository" 'v*' \
-    | awk '{ sub("refs/tags/v", "", $2); if ($2 ~ /^[0-9]+\.[0-9]+\.[0-9]+$/) print $2 }' \
-    | sort -V
-}
-
 current_version="$(env_value STAR_API_VERSION)"
 [[ "$current_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "STAR_API_VERSION is missing or invalid in $env_file" >&2; exit 1; }
-
-if [[ "$requested_version" == "latest" ]]; then
-  target_version="$(stable_versions | tail -n 1)"
-else
-  target_version="${requested_version#v}"
-  [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must use X.Y.Z format." >&2; exit 2; }
-  stable_versions | grep -Fxq "$target_version" || { echo "Release tag v$target_version does not exist in the configured repository." >&2; exit 1; }
-fi
-[[ -n "$target_version" ]] || { echo "No stable release tag was found." >&2; exit 1; }
 
 app_image="$(env_value STAR_API_APP_IMAGE)"; app_image="${app_image:-ghcr.io/pstarchen/star-api-app}"
 migrator_image="$(env_value STAR_API_MIGRATOR_IMAGE)"; migrator_image="${migrator_image:-ghcr.io/pstarchen/star-api-migrator}"
 php_runner_image="$(env_value STAR_API_PHP_RUNNER_IMAGE)"; php_runner_image="${php_runner_image:-ghcr.io/pstarchen/star-api-php-runner}"
 
+ghcr_repository() {
+  local image="${1#ghcr.io/}"
+  [[ "$1" == ghcr.io/* && "$image" == */* && "$image" != *:* ]] || {
+    echo "Latest-version discovery requires an untagged ghcr.io image repository: $1" >&2
+    return 1
+  }
+  printf '%s\n' "$image"
+}
+
+stable_versions() {
+  local image_repository token
+  image_repository="$(ghcr_repository "$app_image")"
+  token="$(ghcr_token "$image_repository")"
+  curl --fail --silent --show-error --connect-timeout 8 --max-time 20 \
+    -H "Authorization: Bearer $token" \
+    "https://ghcr.io/v2/${image_repository}/tags/list" \
+    | jq -er '.tags // [] | .[]' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sort -Vu
+}
+
+ghcr_token() {
+  local image_repository="$1"
+  curl --fail --silent --show-error --connect-timeout 8 --max-time 20 \
+    "https://ghcr.io/token?scope=repository:${image_repository}:pull" \
+    | jq -er '.token // .access_token'
+}
+
+image_manifest_exists() {
+  local image="$1"
+  local version="$2"
+  if [[ "$image" != ghcr.io/* ]]; then
+    timeout 45 docker manifest inspect "$image:$version" >/dev/null
+    return
+  fi
+
+  local image_repository token
+  image_repository="$(ghcr_repository "$image")"
+  token="$(ghcr_token "$image_repository")"
+  curl --fail --silent --show-error --connect-timeout 8 --max-time 25 \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+    -o /dev/null \
+    "https://ghcr.io/v2/${image_repository}/manifests/${version}"
+}
+
+retry_command() {
+  local description="$1"
+  local attempts="$2"
+  local delay="$3"
+  shift 3
+  local attempt
+  for attempt in $(seq 1 "$attempts"); do
+    if "$@"; then return 0; fi
+    if [[ "$attempt" == "$attempts" ]]; then
+      echo "$description failed after $attempts attempts." >&2
+      return 1
+    fi
+    echo "$description failed (attempt $attempt/$attempts); retrying in ${delay}s." >&2
+    sleep "$delay"
+  done
+}
+
+if [[ "$requested_version" == "latest" ]]; then
+  target_version="$(retry_command "Latest-version discovery from GHCR" 3 8 stable_versions | tail -n 1)"
+else
+  target_version="${requested_version#v}"
+  [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must use X.Y.Z format." >&2; exit 2; }
+fi
+[[ -n "$target_version" ]] || { echo "No stable release image was found." >&2; exit 1; }
+
 echo "Current version: $current_version"
 echo "Target version:  $target_version"
+
 for image in "$app_image" "$migrator_image" "$php_runner_image"; do
   echo "Checking $image:$target_version"
-  docker manifest inspect "$image:$target_version" >/dev/null
+  retry_command "Image check for $image:$target_version" 5 8 image_manifest_exists "$image" "$target_version"
 done
 
 if [[ "$mode" == "check" ]]; then
@@ -91,15 +156,24 @@ echo "Creating update backup: $backup_dir"
 "${compose[@]}" run --rm --no-deps --user 0:0 -v "$backup_dir:/backup" app sh -c 'tar -C /var/lib/star-api/assets -czf /backup/assets.tar.gz .'
 "${compose[@]}" run --rm --no-deps --entrypoint sh -v "$backup_dir:/backup" secrets-init -c 'tar -C /run/star-api-secrets -czf /backup/secrets.tar.gz .'
 cp "$env_file" "$backup_dir/environment.before-update"
+cp "$compose_file" "$backup_dir/compose.before-update.yml"
 
 echo "Pulling release images while the current application remains online."
-docker pull "$app_image:$target_version"
-docker pull "$migrator_image:$target_version"
-docker pull "$php_runner_image:$target_version"
+retry_command "Image pull for $app_image:$target_version" 5 12 timeout 300 docker pull "$app_image:$target_version"
+retry_command "Image pull for $migrator_image:$target_version" 5 12 timeout 300 docker pull "$migrator_image:$target_version"
+retry_command "Image pull for $php_runner_image:$target_version" 5 12 timeout 300 docker pull "$php_runner_image:$target_version"
 
 next_env="${env_file}.star-api-update.$$"
-cleanup_next_env() { rm -f "$next_env"; }
-trap cleanup_next_env EXIT
+next_compose="${compose_file}.star-api-update.$$"
+cleanup_staged_files() { rm -f "$next_env" "$next_compose"; }
+trap cleanup_staged_files EXIT
+
+if [[ -n "$next_compose_file" ]]; then
+  cp "$next_compose_file" "$next_compose"
+  chmod --reference="$compose_file" "$next_compose"
+  mv "$next_compose" "$compose_file"
+fi
+
 awk -v version="$target_version" '
   BEGIN { replaced = 0 }
   /^STAR_API_VERSION=/ { print "STAR_API_VERSION=" version; replaced = 1; next }
@@ -113,6 +187,9 @@ if ! "${compose[@]}" config --quiet; then
   cp "$backup_dir/environment.before-update" "$next_env"
   chmod --reference="$env_file" "$next_env"
   mv "$next_env" "$env_file"
+  cp "$backup_dir/compose.before-update.yml" "$next_compose"
+  chmod --reference="$compose_file" "$next_compose"
+  mv "$next_compose" "$compose_file"
   echo "Target Compose configuration is invalid; restored STAR_API_VERSION=$current_version before any migration started." >&2
   exit 1
 fi

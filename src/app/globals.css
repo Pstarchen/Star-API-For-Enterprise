@@ -482,11 +482,19 @@ a:not([class]) { color: inherit; }
 .portal-brand-island { flex: 0 0 auto; padding-inline: 10px 13px; }
 .portal-links-island { flex: 0 0 auto; padding-inline: 5px; }
 .portal-actions-island { flex: 0 0 auto; padding-inline: 5px; }
-.portal-action-control {
+.portal-actions-island .portal-action-control {
   height: 36px;
+  min-width: 36px;
   border-radius: 999px;
+  padding-inline: 12px;
+  font-size: 13px;
+  line-height: 1;
+  transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1);
 }
-.portal-action-control:focus-visible {
+.portal-actions-island .portal-action-control:hover { transform: translateY(-1px); }
+.portal-actions-island .portal-action-control:active { transform: translateY(0) scale(.98); }
+.portal-actions-island .portal-theme-control { width: 36px; padding: 0; }
+.portal-actions-island .portal-action-control:focus-visible {
   outline: none;
   box-shadow: 0 0 0 3px var(--focus-soft);
 }

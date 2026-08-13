@@ -94,6 +94,15 @@ jobs:
             exit 1
           }
 
+      - name: Build versioned deployment payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          install -d -m 700 "$RUNNER_TEMP/star-api-deploy"
+          git show "v${DEPLOY_VERSION}:compose.production.yml" > "$RUNNER_TEMP/star-api-deploy/compose.production.yml"
+          install -m 700 scripts/update-production.sh "$RUNNER_TEMP/star-api-deploy/update-production.sh"
+          tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh
+
       - name: Inspect and update production
         shell: bash
         env:
@@ -117,28 +126,45 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ConnectTimeout=15
           )
-          ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" <<'REMOTE'
+          scp_options=(
+            -i "$HOME/.ssh/star-api-production"
+            -P "$SSH_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=15
+          )
+          remote_payload="/tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
+          timeout 25m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" <<'REMOTE'
           set -Eeuo pipefail
 
           version="$1"
           deploy_path="$2"
+          payload_archive="$3"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
+          [[ "$payload_archive" =~ ^/tmp/star-api-deploy-[0-9]+-[0-9]+\.tar\.gz$ ]]
           cd -- "$deploy_path"
-          test -d .git
+          test -f .env.production
+          test -f compose.production.yml
 
-          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
-            echo "Production worktree has local changes; refusing to overwrite it." >&2
-            git status --short >&2
-            exit 1
-          fi
+          payload_dir="$(mktemp -d /tmp/star-api-deploy.XXXXXXXX)"
+          cleanup() { rm -rf -- "$payload_dir" "$payload_archive"; }
+          trap cleanup EXIT
+          tar -xzf "$payload_archive" -C "$payload_dir" --no-same-owner --no-same-permissions
+          test -f "$payload_dir/compose.production.yml"
+          test -f "$payload_dir/update-production.sh"
+          chmod 700 "$payload_dir/update-production.sh"
 
-          git fetch --tags --prune origin
-          target_commit="$(git rev-parse --verify "refs/tags/v${version}^{commit}")"
-          git checkout --detach "$target_commit"
-
-          bash scripts/update-production.sh --check "$version"
-          bash scripts/update-production.sh "$version"
+          STAR_API_PROJECT_DIR="$deploy_path" \
+          STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
+            bash "$payload_dir/update-production.sh" --check "$version"
+          STAR_API_PROJECT_DIR="$deploy_path" \
+          STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
+            bash "$payload_dir/update-production.sh" "$version"
+          install -m 700 "$payload_dir/update-production.sh" "$deploy_path/scripts/update-production.sh"
 
           compose=(docker compose --env-file .env.production -f compose.production.yml)
           for service in postgres redis app php-runner; do
@@ -175,4 +201,4 @@ jobs:
       - name: Remove temporary SSH key
         if: ${{ always() }}
         shell: bash
-        run: rm -f "$HOME/.ssh/star-api-production"
+        run: rm -rf "$HOME/.ssh/star-api-production" "$RUNNER_TEMP/star-api-deploy" "$RUNNER_TEMP/star-api-deploy.tar.gz"
