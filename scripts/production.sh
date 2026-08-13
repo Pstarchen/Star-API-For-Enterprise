@@ -120,7 +120,7 @@ case "$command_name" in
       printf '\n' >&2
     fi
     [[ -n "$token" ]] || { echo "GitHub Actions token is required." >&2; exit 1; }
-    printf '%s' "$token" | compose run --rm --no-deps --entrypoint sh -T secrets-init -c 'umask 077; cat > /run/star-api-secrets/GITHUB_ACTIONS_TOKEN'
+    printf '%s' "$token" | compose run --rm --no-deps --entrypoint sh -T secrets-init -c 'umask 077; cat > /run/star-api-secrets/GITHUB_ACTIONS_TOKEN.tmp && chmod 0444 /run/star-api-secrets/GITHUB_ACTIONS_TOKEN.tmp && mv /run/star-api-secrets/GITHUB_ACTIONS_TOKEN.tmp /run/star-api-secrets/GITHUB_ACTIONS_TOKEN'
     unset token
     set_env_value STAR_API_GITHUB_TOKEN_FILE /run/star-api-secrets/GITHUB_ACTIONS_TOKEN
     compose up -d app

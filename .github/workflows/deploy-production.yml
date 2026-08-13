@@ -101,7 +101,8 @@ jobs:
           install -d -m 700 "$RUNNER_TEMP/star-api-deploy"
           git show "v${DEPLOY_VERSION}:compose.production.yml" > "$RUNNER_TEMP/star-api-deploy/compose.production.yml"
           install -m 700 scripts/update-production.sh "$RUNNER_TEMP/star-api-deploy/update-production.sh"
-          tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh
+          install -m 700 scripts/production.sh "$RUNNER_TEMP/star-api-deploy/production.sh"
+          tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh production.sh
 
       - name: Inspect and update production
         shell: bash
@@ -156,7 +157,9 @@ jobs:
           tar -xzf "$payload_archive" -C "$payload_dir" --no-same-owner --no-same-permissions
           test -f "$payload_dir/compose.production.yml"
           test -f "$payload_dir/update-production.sh"
+          test -f "$payload_dir/production.sh"
           chmod 700 "$payload_dir/update-production.sh"
+          chmod 700 "$payload_dir/production.sh"
 
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
@@ -164,7 +167,9 @@ jobs:
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
             bash "$payload_dir/update-production.sh" "$version"
+          install -d -m 755 "$deploy_path/scripts"
           install -m 700 "$payload_dir/update-production.sh" "$deploy_path/scripts/update-production.sh"
+          install -m 700 "$payload_dir/production.sh" "$deploy_path/scripts/production.sh"
 
           compose=(docker compose --env-file .env.production -f compose.production.yml)
           for service in postgres redis app php-runner; do
