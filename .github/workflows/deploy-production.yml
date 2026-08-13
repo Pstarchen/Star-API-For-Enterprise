@@ -136,7 +136,16 @@ jobs:
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
             -o ConnectTimeout=15
           )
-          remote_payload="/tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
+          timeout 120 ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE_PREP'
+          set -Eeuo pipefail
+          deploy_path="$1"
+          [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
+          install -d -m 700 "$deploy_path/.deploy-tmp"
+          find /tmp -maxdepth 1 \( -name 'star-api-deploy-*' -o -name 'star-api-deploy.*' \) -exec rm -rf -- {} + 2>/dev/null || true
+          find "$deploy_path/.deploy-tmp" -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf -- {} + 2>/dev/null || true
+          df -h "$deploy_path" /tmp || true
+          REMOTE_PREP
+          remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
           timeout 90m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" <<'REMOTE'
           set -Eeuo pipefail
@@ -146,12 +155,13 @@ jobs:
           payload_archive="$3"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
-          [[ "$payload_archive" =~ ^/tmp/star-api-deploy-[0-9]+-[0-9]+\.tar\.gz$ ]]
+          [[ "$payload_archive" == "$deploy_path/.deploy-tmp"/star-api-deploy-*.tar.gz ]]
           cd -- "$deploy_path"
           test -f .env.production
           test -f compose.production.yml
 
-          payload_dir="$(mktemp -d /tmp/star-api-deploy.XXXXXXXX)"
+          install -d -m 700 "$deploy_path/.deploy-tmp"
+          payload_dir="$(mktemp -d "$deploy_path/.deploy-tmp/payload.XXXXXXXX")"
           cleanup() { rm -rf -- "$payload_dir" "$payload_archive"; }
           trap cleanup EXIT
           tar -xzf "$payload_archive" -C "$payload_dir" --no-same-owner --no-same-permissions
