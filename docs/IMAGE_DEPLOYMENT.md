@@ -139,6 +139,29 @@ curl --fail https://example.com/api/health
 Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷和密钥卷保持不变。`POSTGRES_IMAGE`、`REDIS_IMAGE` 不跟随 `STAR_API_VERSION`，必须单独规划升级。
 健康接口返回的 `version` 同样来自 `STAR_API_VERSION`，可用于确认反向代理后实际运行的版本。
 
+### GitHub Actions 受保护部署
+
+仓库提供 `Deploy production` 手动工作流。它只接受 SSH 私钥，不接受明文密码；服务器不需要向网站容器暴露 Docker Socket。先在 GitHub 仓库的 `Settings -> Environments` 创建 `production` 环境，按需设置审批人和受保护分支，再配置：
+
+| 类型 | 名称 | 用途 |
+| --- | --- | --- |
+| Secret | `PRODUCTION_SSH_HOST` | 生产服务器域名或 IP |
+| Secret | `PRODUCTION_SSH_PRIVATE_KEY` | 无口令的专用部署私钥，建议使用 ED25519 |
+| Secret | `PRODUCTION_SSH_KNOWN_HOSTS` | 从可信服务器控制台确认的 `known_hosts` 记录；非 22 端口使用 `[host]:port` 格式 |
+| Variable | `PRODUCTION_SSH_PORT` | SSH 端口，默认 `22` |
+| Variable | `PRODUCTION_SSH_USER` | SSH 用户，默认 `root` |
+| Variable | `PRODUCTION_DEPLOY_PATH` | 仓库在服务器上的绝对路径，如 `/opt/Star-API-For-Enterprise` |
+| Variable | `PRODUCTION_HEALTH_URL` | 可选，反向代理后的公网 `/api/health` 地址 |
+
+部署公钥应只安装到目标用户的 `~/.ssh/authorized_keys`，私钥只保存在 GitHub Environment Secret 中。`PRODUCTION_SSH_KNOWN_HOSTS` 必须来自可信的服务器控制台，不要在未核对指纹的情况下直接信任 `ssh-keyscan` 输出。
+
+在仓库 `Actions -> Deploy production -> Run workflow` 中填写不带 `v` 的稳定版本，并输入 `DEPLOY` 确认。工作流会依次执行：
+
+1. 校验版本标签、SSH 配置和部署路径。
+2. 使用固定主机指纹建立 SSH 连接，拒绝有本地改动的生产工作树。
+3. 检出目标标签，调用 `scripts/update-production.sh` 创建备份、拉取镜像、执行迁移并更新容器。
+4. 验证 PostgreSQL、Redis、App 和 PHP Runner 都在运行，且内外健康接口的版本号和数据库状态正确。
+
 ## 6. 回滚边界
 
 镜像标签可以改回旧版本，但数据库迁移只向前执行，旧应用不一定兼容已经升级的数据库结构。因此生产回滚必须基于发布说明判断：

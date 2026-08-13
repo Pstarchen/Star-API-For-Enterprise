@@ -1,0 +1,178 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable semantic version without the v prefix
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY to start the production update
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: star-api-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy v${{ inputs.version }}
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    env:
+      DEPLOY_VERSION: ${{ inputs.version }}
+      DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
+      SSH_PORT: ${{ vars.PRODUCTION_SSH_PORT || '22' }}
+      SSH_USER: ${{ vars.PRODUCTION_SSH_USER || 'root' }}
+      DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
+      PUBLIC_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate deployment inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$DEPLOY_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must use stable X.Y.Z format." >&2
+            exit 1
+          }
+          [[ "$DEPLOY_CONFIRMATION" == "DEPLOY" ]] || {
+            echo "Production deployment confirmation must be DEPLOY." >&2
+            exit 1
+          }
+          [[ "$SSH_PORT" =~ ^[0-9]+$ ]] && (( SSH_PORT >= 1 && SSH_PORT <= 65535 )) || {
+            echo "PRODUCTION_SSH_PORT must be between 1 and 65535." >&2
+            exit 1
+          }
+          [[ "$SSH_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || {
+            echo "PRODUCTION_SSH_USER contains unsupported characters." >&2
+            exit 1
+          }
+          [[ "$DEPLOY_PATH" == /* && "$DEPLOY_PATH" != "/" ]] || {
+            echo "PRODUCTION_DEPLOY_PATH must be an absolute non-root path." >&2
+            exit 1
+          }
+          [[ "$DEPLOY_PATH" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+            echo "PRODUCTION_DEPLOY_PATH contains unsupported characters." >&2
+            exit 1
+          }
+          [[ -z "$PUBLIC_HEALTH_URL" || "$PUBLIC_HEALTH_URL" =~ ^https?://[^[:space:]]+/api/health([/?#].*)?$ ]] || {
+            echo "PRODUCTION_HEALTH_URL must be an HTTP(S) /api/health URL." >&2
+            exit 1
+          }
+          git rev-parse --verify "refs/tags/v${DEPLOY_VERSION}^{commit}" >/dev/null || {
+            echo "Tag v${DEPLOY_VERSION} is not present in this checkout." >&2
+            exit 1
+          }
+
+      - name: Configure verified SSH access
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PRODUCTION_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PRODUCTION_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_PRIVATE_KEY" && -n "$SSH_KNOWN_HOSTS" ]] || {
+            echo "Production SSH key or known-hosts secret is missing." >&2
+            exit 1
+          }
+          install -d -m 700 "$HOME/.ssh"
+          install -m 600 /dev/null "$HOME/.ssh/star-api-production"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/star-api-production"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -P "" -f "$HOME/.ssh/star-api-production" >/dev/null || {
+            echo "PRODUCTION_SSH_PRIVATE_KEY must be a valid unencrypted deployment key." >&2
+            exit 1
+          }
+
+      - name: Inspect and update production
+        shell: bash
+        env:
+          SSH_HOST: ${{ secrets.PRODUCTION_SSH_HOST }}
+        run: |
+          set -euo pipefail
+          [[ -n "$SSH_HOST" ]] || {
+            echo "PRODUCTION_SSH_HOST is missing." >&2
+            exit 1
+          }
+          [[ "$SSH_HOST" =~ ^[A-Za-z0-9.-]+$ ]] || {
+            echo "PRODUCTION_SSH_HOST contains unsupported characters." >&2
+            exit 1
+          }
+          ssh_options=(
+            -i "$HOME/.ssh/star-api-production"
+            -p "$SSH_PORT"
+            -o BatchMode=yes
+            -o IdentitiesOnly=yes
+            -o StrictHostKeyChecking=yes
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+            -o ConnectTimeout=15
+          )
+          ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" <<'REMOTE'
+          set -Eeuo pipefail
+
+          version="$1"
+          deploy_path="$2"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
+          cd -- "$deploy_path"
+          test -d .git
+
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "Production worktree has local changes; refusing to overwrite it." >&2
+            git status --short >&2
+            exit 1
+          fi
+
+          git fetch --tags --prune origin
+          target_commit="$(git rev-parse --verify "refs/tags/v${version}^{commit}")"
+          git checkout --detach "$target_commit"
+
+          bash scripts/update-production.sh --check "$version"
+          bash scripts/update-production.sh "$version"
+
+          compose=(docker compose --env-file .env.production -f compose.production.yml)
+          for service in postgres redis app php-runner; do
+            healthy=0
+            for _ in $(seq 1 24); do
+              container_id="$("${compose[@]}" ps --quiet "$service")"
+              if [[ -n "$container_id" && "$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")" == "healthy" ]]; then
+                healthy=1
+                break
+              fi
+              sleep 5
+            done
+            [[ "$healthy" == "1" ]] || {
+              echo "Required service did not become healthy: $service" >&2
+              "${compose[@]}" ps >&2
+              exit 1
+            }
+          done
+          app_port="$(sed -n 's/^APP_PORT=//p' .env.production | tail -n 1 | tr -d '\r')"
+          app_port="${app_port:-18081}"
+          curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${app_port}/api/health"
+          REMOTE
+
+      - name: Verify public health endpoint
+        if: ${{ vars.PRODUCTION_HEALTH_URL != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          health="$(curl --fail --silent --show-error --max-time 15 "$PUBLIC_HEALTH_URL")"
+          grep -Eq '"version"[[:space:]]*:[[:space:]]*"'"$DEPLOY_VERSION"'"' <<<"$health"
+          grep -Eq '"database"[[:space:]]*:[[:space:]]*"connected"' <<<"$health"
+          printf '%s\n' "$health"
+
+      - name: Remove temporary SSH key
+        if: ${{ always() }}
+        shell: bash
+        run: rm -f "$HOME/.ssh/star-api-production"
