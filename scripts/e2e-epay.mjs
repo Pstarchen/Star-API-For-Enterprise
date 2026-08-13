@@ -121,6 +121,10 @@ try {
   assert(result.response.status === 403, `non-admin provider access should be forbidden: ${result.response.status}`);
   result = await api("/api/v1/admin/payment-providers", { method: "POST", body: JSON.stringify({ name: "Unsafe", gatewayUrl: "http://127.0.0.1/", merchantPid, merchantKey, paymentTypes: ["alipay"], feeRate: "0", minAmount: "1.00", maxAmount: "100.00", sortOrder: 0, enabled: true }) }, "admin");
   assert(result.response.status === 400, `private payment gateway should be rejected: ${result.response.status} ${result.text}`);
+  result = await api("/api/v1/admin/payment-providers", { method: "POST", body: JSON.stringify({ name: "Forged profile", gatewayUrl: "https://example.com/pay/", merchantPid, merchantKey, paymentTypes: ["alipay"], protocolProfile: "ID0_STANDARD", feeRate: "0", minAmount: "1.00", maxAmount: "100.00", sortOrder: 0, enabled: false }) }, "admin");
+  assert(result.response.status === 400, `client-selected protocol profile should be rejected: ${result.response.status} ${result.text}`);
+  result = await api("/api/v1/admin/payment-providers", { method: "POST", body: JSON.stringify({ name: "Invalid ID0 method", gatewayUrl: "https://pay.id0.cn/", merchantPid, merchantKey, paymentTypes: ["qqpay"], feeRate: "0", minAmount: "1.00", maxAmount: "100.00", sortOrder: 0, enabled: false }) }, "admin");
+  assert(result.response.status === 400, `pay.id0.cn QQ payment should be rejected: ${result.response.status} ${result.text}`);
 
   const createPayload = { name: "E2E 易支付", gatewayUrl: "https://example.com/pay/", merchantPid, merchantKey, paymentTypes: ["alipay", "wxpay"], feeRate: "1.2500", minAmount: "1.00", maxAmount: "500.00", sortOrder: 10, enabled: true, description: "EPay lifecycle E2E" };
   result = await api("/api/v1/admin/payment-providers", { method: "POST", body: JSON.stringify(createPayload) }, "admin");

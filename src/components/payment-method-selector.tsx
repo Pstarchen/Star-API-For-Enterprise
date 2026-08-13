@@ -56,7 +56,7 @@ export function PaymentMethodSelector({ channels, paymentProviders }: { channels
           <SelectContent>{provider.paymentTypes.map((type) => <SelectItem key={type} value={type}>{epayPaymentTypeNames[type]}</SelectItem>)}</SelectContent>
         </Select>
       </Field>
-      <div className="grid grid-cols-3 gap-2 rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface-subtle)] p-3 text-[9px]"><Info label="最低金额" value={`¥${provider.minAmount}`} /><Info label="最高金额" value={`¥${provider.maxAmount}`} /><Info label="服务费率" value={`${provider.feeRate}%`} /></div>
+      <div className="grid grid-cols-3 gap-2 rounded-[var(--radius-control)] border border-[var(--line)] bg-[var(--surface-subtle)] p-3 text-[9px]"><Info label="最低金额" value={`¥${provider.minAmount}`} /><Info label="最高金额" value={`¥${provider.maxAmount}`} /><Info label="渠道费率" value={`${provider.feeRate}%`} /></div>
     </>}
   </div>;
 }

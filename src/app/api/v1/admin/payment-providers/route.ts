@@ -35,6 +35,7 @@ function providerError(error: unknown) {
     INVALID_EPAY_GATEWAY: "网关地址必须是无账号密码、查询参数和片段的 HTTP(S) 地址",
     PRIVATE_UPSTREAM_BLOCKED: "支付网关不能指向本机、内网或保留地址",
     EPAY_PROVIDER_INCOMPLETE: "服务商名称、商户 PID 和支付类型不能为空",
+    EPAY_ID0_PAYMENT_TYPE_UNSUPPORTED: "pay.id0.cn 标准协议仅支持支付宝和微信支付",
     EPAY_KEY_REQUIRED: "首次创建服务商必须填写商户密钥",
     EPAY_FEE_INVALID: "费率必须在 0% 到 100% 之间",
     EPAY_AMOUNT_RANGE_INVALID: "最低与最高支付金额范围不正确",
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     return Response.json({ code: 201, message: "易支付服务商已创建", data: paymentProviderView(provider) }, { status: 201, headers: noStoreHeaders });
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
-    const status = ["INVALID_EPAY_GATEWAY", "INVALID_UPSTREAM_URL", "PRIVATE_UPSTREAM_BLOCKED", "EPAY_PROVIDER_INCOMPLETE", "EPAY_KEY_REQUIRED", "EPAY_FEE_INVALID", "EPAY_AMOUNT_RANGE_INVALID"].includes(code) ? 400 : 502;
+    const status = ["INVALID_EPAY_GATEWAY", "INVALID_UPSTREAM_URL", "PRIVATE_UPSTREAM_BLOCKED", "EPAY_PROVIDER_INCOMPLETE", "EPAY_ID0_PAYMENT_TYPE_UNSUPPORTED", "EPAY_KEY_REQUIRED", "EPAY_FEE_INVALID", "EPAY_AMOUNT_RANGE_INVALID"].includes(code) ? 400 : 502;
     return Response.json({ code: status, message: providerError(error) }, { status, headers: noStoreHeaders });
   }
 }
@@ -79,7 +80,7 @@ export async function PATCH(request: Request) {
     return Response.json({ code: 200, message: "易支付服务商已保存", data: paymentProviderView(provider) }, { headers: noStoreHeaders });
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
-    const status = code === "EPAY_PROVIDER_NOT_FOUND" ? 404 : code === "EPAY_PROVIDER_PENDING_CONFIG_LOCKED" ? 409 : ["INVALID_EPAY_GATEWAY", "INVALID_UPSTREAM_URL", "PRIVATE_UPSTREAM_BLOCKED", "EPAY_PROVIDER_INCOMPLETE", "EPAY_FEE_INVALID", "EPAY_AMOUNT_RANGE_INVALID"].includes(code) ? 400 : 502;
+    const status = code === "EPAY_PROVIDER_NOT_FOUND" ? 404 : code === "EPAY_PROVIDER_PENDING_CONFIG_LOCKED" ? 409 : ["INVALID_EPAY_GATEWAY", "INVALID_UPSTREAM_URL", "PRIVATE_UPSTREAM_BLOCKED", "EPAY_PROVIDER_INCOMPLETE", "EPAY_ID0_PAYMENT_TYPE_UNSUPPORTED", "EPAY_FEE_INVALID", "EPAY_AMOUNT_RANGE_INVALID"].includes(code) ? 400 : 502;
     return Response.json({ code: status, message: providerError(error) }, { status, headers: noStoreHeaders });
   }
 }

@@ -451,9 +451,6 @@ a:not([class]) { color: inherit; }
   align-items: center;
   justify-content: center;
   gap: 10px;
-  transform: translateZ(0);
-  transform-origin: top center;
-  transition: transform 420ms cubic-bezier(.22, 1, .36, 1);
 }
 
 .portal-island {
@@ -504,7 +501,8 @@ a:not([class]) { color: inherit; }
 }
 .portal-mobile-island { width: 100%; padding-inline: 7px; }
 
-.portal-header[data-scroll-state="down"] .portal-nav {
+.portal-header[data-scroll-state="down"] .portal-brand-island,
+.portal-header[data-scroll-state="down"] .portal-links-island {
   transform: translateY(-2px) scale(.972);
 }
 
@@ -513,17 +511,13 @@ a:not([class]) { color: inherit; }
   box-shadow: 0 8px 24px rgb(31 39 67 / 16%), inset 0 1px 0 rgb(255 255 255 / 78%);
 }
 
-.portal-header[data-account-open="true"] .portal-nav {
-  transform: none;
-  animation: none;
-}
-
 .portal-header[data-account-open="true"] .portal-island {
   border-color: color-mix(in srgb, var(--brand-line) 72%, var(--line));
   box-shadow: 0 8px 24px rgb(31 39 67 / 16%), inset 0 1px 0 rgb(255 255 255 / 78%);
 }
 
-.portal-header[data-scroll-state="up"] .portal-nav {
+.portal-header[data-scroll-state="up"] .portal-brand-island,
+.portal-header[data-scroll-state="up"] .portal-links-island {
   animation: portal-island-return 520ms cubic-bezier(.22, 1.32, .36, 1) both;
 }
 
@@ -1246,9 +1240,10 @@ html[data-theme="dark"] .auth-stage { background: linear-gradient(rgb(14 17 26 /
     transform: none;
   }
   .app-launch { display: none; }
-  .portal-header[data-scroll-state="down"] .portal-nav,
-  .portal-header[data-scroll-state="up"] .portal-nav { animation: none; transform: none; }
-  .portal-header[data-scroll-state="down"] .portal-island { transform: none; }
+  .portal-header[data-scroll-state="down"] .portal-brand-island,
+  .portal-header[data-scroll-state="down"] .portal-links-island,
+  .portal-header[data-scroll-state="up"] .portal-brand-island,
+  .portal-header[data-scroll-state="up"] .portal-links-island { animation: none; transform: none; }
   .file-upload-target:hover { transform: none; }
 }
 

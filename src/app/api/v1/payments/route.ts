@@ -1,15 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
-import { createEpayApiParams, createEpayRedirectParams, normalizeEpayEndpointUrl, parseEpayApiPaymentResult } from "@/lib/epay";
-import { epayPaymentTypes } from "@/lib/payment-options";
+import { createEpayApiParams, createEpayRedirectParams, detectEpayDevice, EpayProtocolError, normalizeEpayEndpointUrl, parseEpayApiPaymentResult } from "@/lib/epay";
+import { epayPaymentTypes, isEpayPaymentTypeSupported, type EpayPaymentType, type EpayProtocolProfile } from "@/lib/payment-options";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
 import { getIntegration } from "@/lib/server/integrations";
 import { getPlatformConfig } from "@/lib/server/installation";
+import { requestEpayApiPayment } from "@/lib/server/epay-gateway";
 import { lockPaymentProvider, paymentProviderSecret } from "@/lib/server/payment-providers";
 import { createAlipayUrl, createWechatNative, paymentOrderNo } from "@/lib/server/payments";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
-import { forwardRequest } from "@/lib/server/upstream";
 
 const schema = z.object({
   orderType: z.enum(["INVOICE", "RECHARGE"]).default("INVOICE"),
@@ -58,10 +58,10 @@ export async function POST(request: Request) {
         if (!(await lockPaymentProvider(transaction, parsed.data.paymentProviderId!))) throw new Error("EPAY_PROVIDER_UNAVAILABLE");
         const paymentProvider = await transaction.paymentProvider.findUnique({ where: { id: parsed.data.paymentProviderId! } });
         if (!paymentProvider?.enabled) throw new Error("EPAY_PROVIDER_UNAVAILABLE");
-        if (!paymentProvider.paymentTypes.includes(parsed.data.paymentType!)) throw new Error("EPAY_PAYMENT_TYPE_UNSUPPORTED");
+        if (!paymentProvider.paymentTypes.includes(parsed.data.paymentType!) || !isEpayPaymentTypeSupported(paymentProvider.protocolProfile as EpayProtocolProfile, parsed.data.paymentType! as EpayPaymentType)) throw new Error("EPAY_PAYMENT_TYPE_UNSUPPORTED");
         if (amount.lt(paymentProvider.minAmount) || amount.gt(paymentProvider.maxAmount)) throw new Error(`EPAY_AMOUNT_RANGE:${paymentProvider.minAmount.toFixed(2)}:${paymentProvider.maxAmount.toFixed(2)}`);
         const order = await transaction.paymentOrder.create({ data: { orderNo, tenantId: workspace.tenantId, orderType: parsed.data.orderType, invoiceId: invoice?.id, channel: "EPAY", amount, subject, paymentProviderId: paymentProvider.id, providerNameSnapshot: paymentProvider.name, paymentType: parsed.data.paymentType, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });
-        return { order, gatewayUrl: paymentProvider.gatewayUrl, merchantPid: paymentProvider.merchantPid, merchantKey: paymentProviderSecret(paymentProvider), providerId: paymentProvider.id, submissionMode: paymentProvider.submissionMode };
+        return { order, gatewayUrl: paymentProvider.gatewayUrl, merchantPid: paymentProvider.merchantPid, merchantKey: paymentProviderSecret(paymentProvider), providerId: paymentProvider.id, protocolProfile: paymentProvider.protocolProfile, submissionMode: paymentProvider.submissionMode };
       });
       try {
         if (pending.submissionMode !== "API") {
@@ -90,22 +90,10 @@ export async function POST(request: Request) {
           amount: amount.toFixed(2),
           subject,
           clientIp: requestIp(request) ?? "0.0.0.0",
+          device: detectEpayDevice(request.headers.get("user-agent")),
         });
-        const upstream = await forwardRequest({
-          baseUrl: normalizeEpayEndpointUrl(pending.gatewayUrl, "mapi"),
-          relativePath: "",
-          method: "POST",
-          query: "",
-          body: new TextEncoder().encode(new URLSearchParams(params).toString()),
-          contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-          timeoutMs: 15000,
-          authType: null,
-          secrets: {},
-          kind: "PUBLIC_API",
-          requestId: orderNo,
-        });
-        const payload = JSON.parse(new TextDecoder().decode(upstream.body)) as unknown;
-        const target = parseEpayApiPaymentResult(payload);
+        const payload = await requestEpayApiPayment({ url: normalizeEpayEndpointUrl(pending.gatewayUrl, "mapi"), params, timeoutMs: 15000 });
+        const target = parseEpayApiPaymentResult(payload, { strictSingleTarget: pending.protocolProfile === "ID0_STANDARD" });
         const updated = await prisma.paymentOrder.update({ where: { id: pending.order.id }, data: { paymentUrl: target.paymentUrl, paymentQrCode: target.paymentQrCode, paymentScheme: target.paymentScheme } });
         return Response.json({ code: 201, message: "支付订单已创建", data: { id: updated.id, orderNo, orderType: updated.orderType, channel: updated.channel, amount: updated.amount.toString(), paymentUrl: updated.paymentUrl, paymentQrCode: updated.paymentQrCode, paymentScheme: updated.paymentScheme, providerName: updated.providerNameSnapshot, paymentType: updated.paymentType, bank: null, codePay: null, expiresAt: updated.expiresAt?.toISOString() } }, { status: 201, headers: noStoreHeaders });
       } catch (error) {
@@ -130,7 +118,8 @@ export async function POST(request: Request) {
       const [, minAmount, maxAmount] = code.split(":");
       return Response.json({ code: 400, message: `支付金额需在 ¥${minAmount} 至 ¥${maxAmount} 之间` }, { status: 400, headers: noStoreHeaders });
     }
-    if (["EPAY_API_INVALID_RESPONSE", "EPAY_API_ORDER_FAILED", "EPAY_API_NO_PAYMENT_TARGET", "EPAY_API_INVALID_PAYMENT_URL"].includes(code)) return Response.json({ code: 502, message: "易支付网关未返回有效的支付入口，请检查服务商接口兼容性" }, { status: 502, headers: noStoreHeaders });
+    if (error instanceof EpayProtocolError && error.message === "EPAY_API_ORDER_FAILED") return Response.json({ code: 502, message: error.providerMessage ? `易支付下单失败：${error.providerMessage}` : "易支付网关拒绝了下单请求" }, { status: 502, headers: noStoreHeaders });
+    if (["EPAY_API_INVALID_RESPONSE", "EPAY_API_RESPONSE_TOO_LARGE", "EPAY_API_REDIRECT_BLOCKED", "EPAY_API_TARGET_COUNT_INVALID", "EPAY_API_NO_PAYMENT_TARGET", "EPAY_API_INVALID_PAYMENT_URL"].includes(code) || code.startsWith("EPAY_API_HTTP_")) return Response.json({ code: 502, message: "易支付网关未返回有效的支付入口，请检查服务商接口兼容性" }, { status: 502, headers: noStoreHeaders });
     return Response.json({ code: 502, message: "支付渠道下单失败，请检查渠道配置" }, { status: 502, headers: noStoreHeaders });
   }
   const order = await prisma.paymentOrder.create({ data: { orderNo, tenantId: workspace.tenantId, orderType: parsed.data.orderType, invoiceId: invoice?.id, channel: parsed.data.channel, amount, subject, paymentUrl, expiresAt: new Date(Date.now() + 30 * 60 * 1000) } });

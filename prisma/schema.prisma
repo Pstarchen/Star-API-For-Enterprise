@@ -720,6 +720,7 @@ model PaymentProvider {
   merchantPid          String
   merchantKeyEncrypted Bytes
   paymentTypes         String[]
+  protocolProfile      String                      @default("GENERIC_EPAY")
   submissionMode       String                      @default("REDIRECT")
   feeRate              Decimal                     @default(0) @db.Decimal(7, 4)
   minAmount            Decimal                     @default(0.01) @db.Decimal(14, 2)

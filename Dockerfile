@@ -25,6 +25,7 @@ ENV DATABASE_URL="postgresql://starapi:build-only@postgres:5432/starapi?schema=p
 RUN npm run build
 
 FROM migrator-dependencies AS migrator
+ENV PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1
 COPY prisma ./prisma
 COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/star-api-entrypoint
 ENTRYPOINT ["/usr/local/bin/star-api-entrypoint"]

@@ -1,6 +1,18 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { EpayPaymentType } from "@/lib/payment-options";
 
+export type EpayDevice = "pc" | "mobile" | "qq" | "wechat" | "alipay" | "jump";
+
+export class EpayProtocolError extends Error {
+  readonly providerMessage: string;
+
+  constructor(code: string, providerMessage = "") {
+    super(code);
+    this.name = "EpayProtocolError";
+    this.providerMessage = providerMessage;
+  }
+}
+
 function canonicalEntries(params: Record<string, string>) {
   return Object.entries(params)
     .filter(([key, value]) => key !== "sign" && key !== "sign_type" && value !== "")
@@ -32,12 +44,53 @@ export function normalizeEpayGatewayUrl(value: string) {
   return gateway.toString();
 }
 
-export function normalizeEpayEndpointUrl(value: string, endpoint: "submit" | "mapi") {
+export function normalizeEpayEndpointUrl(value: string, endpoint: "submit" | "mapi" | "api") {
   const url = new URL(normalizeEpayGatewayUrl(value));
-  const file = endpoint === "mapi" ? "mapi.php" : "submit.php";
-  url.pathname = url.pathname.replace(/(?:submit|mapi)\.php$/i, file);
-  if (!/(?:submit|mapi)\.php$/i.test(url.pathname)) url.pathname = `${url.pathname.replace(/\/$/, "")}/${file}`;
+  const file = endpoint === "mapi" ? "mapi.php" : endpoint === "api" ? "api.php" : "submit.php";
+  url.pathname = url.pathname.replace(/(?:submit|mapi|api)\.php$/i, file);
+  if (!/(?:submit|mapi|api)\.php$/i.test(url.pathname)) url.pathname = `${url.pathname.replace(/\/$/, "")}/${file}`;
   return url.toString();
+}
+
+export function detectEpayDevice(userAgent: string | null | undefined): EpayDevice {
+  const value = userAgent?.toLowerCase() ?? "";
+  if (/alipayclient/.test(value)) return "alipay";
+  if (/micromessenger/.test(value)) return "wechat";
+  if (/(?:^|[\s;])qq\//.test(value)) return "qq";
+  if (/android|iphone|ipad|ipod|mobile|windows phone/.test(value)) return "mobile";
+  return "pc";
+}
+
+function utf8Limit(value: string, maxBytes: number) {
+  let result = "";
+  let bytes = 0;
+  for (const character of value) {
+    const size = Buffer.byteLength(character, "utf8");
+    if (bytes + size > maxBytes) break;
+    result += character;
+    bytes += size;
+  }
+  return result;
+}
+
+function safeProviderMessage(value: unknown) {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
+}
+
+function safePaymentTarget(value: unknown, kind: "payurl" | "qrcode" | "urlscheme") {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized || normalized.length > 4096 || /[\u0000-\u001f\u007f]/.test(normalized)) return null;
+  if (kind === "qrcode") return normalized;
+  try {
+    const url = new URL(normalized);
+    if (url.username || url.password) return null;
+    if (kind === "payurl") return ["http:", "https:"].includes(url.protocol) ? normalized : null;
+    return ["weixin:", "alipays:", "alipay:", "mqqapi:"].includes(url.protocol) ? normalized : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createEpayUrl(input: {
@@ -57,7 +110,7 @@ export function createEpayUrl(input: {
     out_trade_no: input.orderNo,
     notify_url: input.notifyUrl,
     return_url: input.returnUrl,
-    name: input.subject,
+    name: utf8Limit(input.subject, 127),
     money: input.amount,
   };
   const url = new URL(normalizeEpayGatewayUrl(input.gatewayUrl));
@@ -81,7 +134,7 @@ export function createEpayApiParams(input: {
   amount: string;
   subject: string;
   clientIp: string;
-  device?: "pc" | "mobile" | "qq" | "wechat" | "alipay" | "jump";
+  device?: EpayDevice;
 }) {
   const params: Record<string, string> = {
     pid: input.merchantPid,
@@ -89,7 +142,7 @@ export function createEpayApiParams(input: {
     out_trade_no: input.orderNo,
     notify_url: input.notifyUrl,
     return_url: input.returnUrl,
-    name: input.subject,
+    name: utf8Limit(input.subject, 127),
     money: input.amount,
     clientip: input.clientIp,
     device: input.device ?? "pc",
@@ -113,20 +166,22 @@ export function createEpayRedirectParams(input: {
     out_trade_no: input.orderNo,
     notify_url: input.notifyUrl,
     return_url: input.returnUrl,
-    name: input.subject,
+    name: utf8Limit(input.subject, 127),
     money: input.amount,
   };
   return { ...params, sign: signEpayParams(params, input.merchantKey), sign_type: "MD5" };
 }
 
-export function parseEpayApiPaymentResult(value: unknown): EpayApiPaymentResult {
+export function parseEpayApiPaymentResult(value: unknown, options: { strictSingleTarget?: boolean } = {}): EpayApiPaymentResult {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("EPAY_API_INVALID_RESPONSE");
   const result = value as Record<string, unknown>;
-  if (String(result.code ?? "") !== "1") throw new Error("EPAY_API_ORDER_FAILED");
-  const paymentUrl = typeof result.payurl === "string" && result.payurl.trim() ? result.payurl.trim() : null;
-  const paymentQrCode = typeof result.qrcode === "string" && result.qrcode.trim() ? result.qrcode.trim() : null;
-  const paymentScheme = typeof result.urlscheme === "string" && result.urlscheme.trim() ? result.urlscheme.trim() : null;
+  if (String(result.code ?? "") !== "1") throw new EpayProtocolError("EPAY_API_ORDER_FAILED", safeProviderMessage(result.msg));
+  const rawTargets = [result.payurl, result.qrcode, result.urlscheme].filter((item) => typeof item === "string" && item.trim());
+  if (options.strictSingleTarget && rawTargets.length !== 1) throw new Error("EPAY_API_TARGET_COUNT_INVALID");
+  const paymentUrl = safePaymentTarget(result.payurl, "payurl");
+  const paymentQrCode = safePaymentTarget(result.qrcode, "qrcode");
+  const paymentScheme = safePaymentTarget(result.urlscheme, "urlscheme");
+  if ((result.payurl && !paymentUrl) || (result.urlscheme && !paymentScheme)) throw new Error("EPAY_API_INVALID_PAYMENT_URL");
   if (![paymentUrl, paymentQrCode, paymentScheme].filter(Boolean).length) throw new Error("EPAY_API_NO_PAYMENT_TARGET");
-  if (paymentUrl && !/^https?:\/\//i.test(paymentUrl)) throw new Error("EPAY_API_INVALID_PAYMENT_URL");
   return { paymentUrl, paymentQrCode, paymentScheme };
 }
