@@ -140,9 +140,22 @@ jobs:
           set -Eeuo pipefail
           deploy_path="$1"
           [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
-          install -d -m 700 "$deploy_path/.deploy-tmp"
           find /tmp -maxdepth 1 \( -name 'star-api-deploy-*' -o -name 'star-api-deploy.*' \) -exec rm -rf -- {} + 2>/dev/null || true
-          find "$deploy_path/.deploy-tmp" -mindepth 1 -maxdepth 1 -mtime +1 -exec rm -rf -- {} + 2>/dev/null || true
+          if [[ -d "$deploy_path/.deploy-tmp" ]]; then
+            find "$deploy_path/.deploy-tmp" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
+          fi
+          if [[ -d "$deploy_path/backups" ]]; then
+            keep="${STAR_API_BACKUP_KEEP:-3}"
+            find "$deploy_path/backups" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+              | sort -nr \
+              | awk -v keep="$keep" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
+              | while IFS= read -r old_backup; do
+                  [[ "$old_backup" == "$deploy_path/backups"/* ]] && rm -rf -- "$old_backup"
+                done
+          fi
+          docker builder prune --force --filter until=24h >/dev/null 2>&1 || true
+          docker image prune --force >/dev/null 2>&1 || true
+          install -d -m 700 "$deploy_path/.deploy-tmp"
           df -h "$deploy_path" /tmp || true
           REMOTE_PREP
           remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
