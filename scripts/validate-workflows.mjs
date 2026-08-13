@@ -25,7 +25,7 @@ assert(qualityCommands.includes("npm run test:upstream"), "CI must test external
 const containerNames = ciWorkflow?.jobs?.container?.strategy?.matrix?.include?.map((item) => item.name) ?? [];
 assert(containerNames.includes("app") && containerNames.includes("php-runner"), "CI must build both app and PHP runner images");
 
-const checkout = workflow.jobs.deploy.steps.find((step) => step.uses === "actions/checkout@v4");
+const checkout = workflow.jobs.deploy.steps.find((step) => step.uses === "actions/checkout@v5");
 assert(checkout?.with?.["fetch-depth"] === 0, "Production checkout must fetch release tags");
 
 const scripts = workflow.jobs.deploy.steps.filter((step) => typeof step.run === "string");

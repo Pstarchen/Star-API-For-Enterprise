@@ -24,7 +24,7 @@ jobs:
     name: Deploy v${{ inputs.version }}
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       DEPLOY_VERSION: ${{ inputs.version }}
       DEPLOY_CONFIRMATION: ${{ inputs.confirmation }}
@@ -33,7 +33,7 @@ jobs:
       DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
       PUBLIC_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -138,7 +138,7 @@ jobs:
           )
           remote_payload="/tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
-          timeout 50m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" <<'REMOTE'
+          timeout 90m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" <<'REMOTE'
           set -Eeuo pipefail
 
           version="$1"
