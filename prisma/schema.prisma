@@ -120,6 +120,13 @@ enum PaymentChannel {
   WECHAT
   BANK_TRANSFER
   CODE_PAY
+  EPAY
+}
+
+enum PaymentProviderHealthStatus {
+  UNKNOWN
+  HEALTHY
+  UNHEALTHY
 }
 
 enum PaymentOrderStatus {
@@ -679,11 +686,14 @@ model PaymentOrder {
   orderNo         String             @unique
   tenantId        String
   invoiceId       String?
+  paymentProviderId String?
   orderType       PaymentOrderType   @default(INVOICE)
   channel         PaymentChannel
   status          PaymentOrderStatus @default(PENDING)
   amount          Decimal            @db.Decimal(14, 2)
   subject         String
+  providerNameSnapshot String?
+  paymentType     String?
   externalTradeNo String?
   paymentUrl      String?
   paidAt          DateTime?
@@ -692,11 +702,37 @@ model PaymentOrder {
   updatedAt       DateTime           @updatedAt
   tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   invoice         Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  paymentProvider PaymentProvider?   @relation(fields: [paymentProviderId], references: [id], onDelete: Restrict)
   walletEntries   WalletEntry[]
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([invoiceId, createdAt(sort: Desc)])
+  @@index([paymentProviderId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
+}
+
+model PaymentProvider {
+  id                   String                      @id @default(cuid())
+  name                 String
+  gatewayUrl           String
+  merchantPid          String
+  merchantKeyEncrypted Bytes
+  paymentTypes         String[]
+  feeRate              Decimal                     @default(0) @db.Decimal(7, 4)
+  minAmount            Decimal                     @default(0.01) @db.Decimal(14, 2)
+  maxAmount            Decimal                     @default(100000000) @db.Decimal(14, 2)
+  sortOrder            Int                         @default(0)
+  enabled              Boolean                     @default(false)
+  description          String?
+  healthStatus         PaymentProviderHealthStatus @default(UNKNOWN)
+  lastTestedAt         DateTime?
+  lastTestMessage      String?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  orders               PaymentOrder[]
+
+  @@index([enabled, sortOrder, createdAt])
+  @@index([healthStatus, lastTestedAt])
 }
 
 model WalletEntry {

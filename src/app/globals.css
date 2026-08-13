@@ -482,13 +482,17 @@ a:not([class]) { color: inherit; }
 .portal-brand-island { flex: 0 0 auto; padding-inline: 10px 13px; }
 .portal-links-island { flex: 0 0 auto; padding-inline: 5px; }
 .portal-actions-island { flex: 0 0 auto; padding-inline: 5px; }
+.portal-nav-link,
 .portal-actions-island .portal-action-control {
   height: 36px;
   min-width: 36px;
   border-radius: 999px;
   padding-inline: 12px;
   font-size: 13px;
+  font-weight: 600;
   line-height: 1;
+}
+.portal-actions-island .portal-action-control {
   transition: color 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1);
 }
 .portal-actions-island .portal-action-control:hover { transform: translateY(-1px); }
@@ -516,13 +520,8 @@ a:not([class]) { color: inherit; }
 .portal-nav-link {
   position: relative;
   display: flex;
-  height: 36px;
   align-items: center;
-  border-radius: 999px;
-  padding-inline: 12px;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 600;
   transition: color 180ms ease, background-color 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1);
 }
 .portal-nav-link:hover { background: var(--surface-hover); color: var(--ink); transform: translateY(-1px); }

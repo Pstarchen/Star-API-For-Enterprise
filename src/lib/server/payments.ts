@@ -70,6 +70,7 @@ export async function completePayment(
     const order = await transaction.paymentOrder.findUnique({ where: { orderNo }, include: { invoice: true, walletEntries: { select: { id: true, balanceAfter: true } } } });
     if (!order || order.amount.comparedTo(amount) !== 0) throw new Error("PAYMENT_MISMATCH");
     if (order.status === "PAID") {
+      if (order.externalTradeNo && order.externalTradeNo !== externalTradeNo) throw new Error("PAYMENT_MISMATCH");
       if (order.orderType === "RECHARGE" && order.walletEntries.length !== 1) throw new Error("PAYMENT_LEDGER_INCONSISTENT");
       const entry = order.walletEntries[0];
       return {

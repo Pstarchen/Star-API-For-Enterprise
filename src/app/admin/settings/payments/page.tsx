@@ -4,5 +4,5 @@ import { integrationSummaries } from "@/lib/server/integrations";
 
 export default async function AdminPaymentSettingsPage() {
   await connection();
-  return <div className="pb-10"><IntegrationSettingsForm initial={await integrationSummaries()} keys={["alipay", "wechat", "bank-transfer", "code-pay"]} eyebrow="PAYMENT CHANNELS" title="支付设置" description="集中配置在线支付、码支付与对公转账渠道；码支付采用收款码展示与管理员核验到账，不伪造第三方自动回调。" /></div>;
+  return <div className="pb-10"><IntegrationSettingsForm initial={await integrationSummaries()} keys={["alipay", "wechat", "bank-transfer", "code-pay"]} eyebrow="DIRECT PAYMENT CHANNELS" title="直连与人工收款" description="支付宝、微信采用官方直连接口；码支付和对公转账采用展示收款信息与管理员核验到账。" /></div>;
 }

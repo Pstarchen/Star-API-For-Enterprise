@@ -29,6 +29,7 @@ export default async function AdminLayout({ children }: LayoutProps<"/admin">) {
     ] },
     { href: "/admin/payments", label: "财务与风控", icon: "billing", ...((pendingPayments + blocked) ? { badge: String(pendingPayments + blocked) } : {}), items: [
       { href: "/admin/payments", label: "支付订单", icon: "billing" },
+      { href: "/admin/payment-providers", label: "支付服务商", icon: "building" },
       { href: "/admin/wallet", label: "余额与退款", icon: "billing" },
       { href: "/admin/risk", label: "风控中心", icon: "risk" },
     ] },

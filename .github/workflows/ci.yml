@@ -25,6 +25,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
+      - run: npm run test:epay
       - run: npm run test:production-updater
       - run: npm run test:workflows
       - run: npm run lint

@@ -112,7 +112,7 @@ bash scripts/update-production.sh
 指定版本升级：
 
 ```bash
-bash scripts/update-production.sh 0.1.6
+bash scripts/update-production.sh 0.1.7
 ```
 
 更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
