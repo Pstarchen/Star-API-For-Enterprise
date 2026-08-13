@@ -145,7 +145,7 @@ jobs:
             find "$deploy_path/.deploy-tmp" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} + 2>/dev/null || true
           fi
           if [[ -d "$deploy_path/backups" ]]; then
-            keep="${STAR_API_BACKUP_KEEP:-3}"
+            keep="${STAR_API_BACKUP_KEEP:-1}"
             find "$deploy_path/backups" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
               | sort -nr \
               | awk -v keep="$keep" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
@@ -153,9 +153,15 @@ jobs:
                   [[ "$old_backup" == "$deploy_path/backups"/* ]] && rm -rf -- "$old_backup"
                 done
           fi
-          docker builder prune --force --filter until=24h >/dev/null 2>&1 || true
-          docker image prune --force >/dev/null 2>&1 || true
+          docker container prune --force >/dev/null 2>&1 || true
+          docker builder prune --all --force >/dev/null 2>&1 || true
+          docker image prune --all --force >/dev/null 2>&1 || true
+          if [[ -d /var/lib/docker/containers ]]; then
+            find /var/lib/docker/containers -type f -name '*-json.log' -exec sh -c ': > "$1"' sh {} \; 2>/dev/null || true
+          fi
+          journalctl --vacuum-size=100M >/dev/null 2>&1 || true
           install -d -m 700 "$deploy_path/.deploy-tmp"
+          docker system df || true
           df -h "$deploy_path" /tmp || true
           REMOTE_PREP
           remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
@@ -186,9 +192,11 @@ jobs:
 
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
+          STAR_API_BACKUP_KEEP=1 \
             bash "$payload_dir/update-production.sh" --check "$version"
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
+          STAR_API_BACKUP_KEEP=1 \
             bash "$payload_dir/update-production.sh" "$version"
           install -d -m 755 "$deploy_path/scripts"
           install -m 700 "$payload_dir/update-production.sh" "$deploy_path/scripts/update-production.sh"
