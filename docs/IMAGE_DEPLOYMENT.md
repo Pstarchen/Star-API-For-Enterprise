@@ -112,10 +112,10 @@ bash scripts/update-production.sh
 指定版本升级：
 
 ```bash
-bash scripts/update-production.sh 0.1.7
+bash scripts/update-production.sh 0.1.8
 ```
 
-更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
+更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。镜像拉取单次默认等待 1800 秒；网络较慢时可在 `.env.production` 中设置 `STAR_API_IMAGE_PULL_TIMEOUT=3600`，允许范围为 60-7200 秒。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
 
 迁移执行后不会自动切回旧镜像，因为旧应用不一定兼容新数据库。失败时脚本会保留目标版本、输出日志命令和备份路径，由管理员根据发布说明决定修复当前版本或完整恢复数据库、媒体与密钥备份。
 

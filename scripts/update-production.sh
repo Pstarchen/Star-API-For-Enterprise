@@ -52,6 +52,12 @@ current_version="$(env_value STAR_API_VERSION)"
 app_image="$(env_value STAR_API_APP_IMAGE)"; app_image="${app_image:-ghcr.io/pstarchen/star-api-app}"
 migrator_image="$(env_value STAR_API_MIGRATOR_IMAGE)"; migrator_image="${migrator_image:-ghcr.io/pstarchen/star-api-migrator}"
 php_runner_image="$(env_value STAR_API_PHP_RUNNER_IMAGE)"; php_runner_image="${php_runner_image:-ghcr.io/pstarchen/star-api-php-runner}"
+image_pull_timeout="${STAR_API_IMAGE_PULL_TIMEOUT:-$(env_value STAR_API_IMAGE_PULL_TIMEOUT)}"
+image_pull_timeout="${image_pull_timeout:-1800}"
+if [[ ! "$image_pull_timeout" =~ ^[0-9]+$ ]] || (( image_pull_timeout < 60 || image_pull_timeout > 7200 )); then
+  echo "STAR_API_IMAGE_PULL_TIMEOUT must be an integer between 60 and 7200 seconds." >&2
+  exit 2
+fi
 
 ghcr_repository() {
   local image="${1#ghcr.io/}"
@@ -159,9 +165,9 @@ cp "$env_file" "$backup_dir/environment.before-update"
 cp "$compose_file" "$backup_dir/compose.before-update.yml"
 
 echo "Pulling release images while the current application remains online."
-retry_command "Image pull for $app_image:$target_version" 5 12 timeout 300 docker pull "$app_image:$target_version"
-retry_command "Image pull for $migrator_image:$target_version" 5 12 timeout 300 docker pull "$migrator_image:$target_version"
-retry_command "Image pull for $php_runner_image:$target_version" 5 12 timeout 300 docker pull "$php_runner_image:$target_version"
+retry_command "Image pull for $app_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$app_image:$target_version"
+retry_command "Image pull for $migrator_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$migrator_image:$target_version"
+retry_command "Image pull for $php_runner_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$php_runner_image:$target_version"
 
 next_env="${env_file}.star-api-update.$$"
 next_compose="${compose_file}.star-api-update.$$"
