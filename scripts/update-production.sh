@@ -58,6 +58,12 @@ if [[ ! "$image_pull_timeout" =~ ^[0-9]+$ ]] || (( image_pull_timeout < 60 || im
   echo "STAR_API_IMAGE_PULL_TIMEOUT must be an integer between 60 and 7200 seconds." >&2
   exit 2
 fi
+backup_keep="${STAR_API_BACKUP_KEEP:-$(env_value STAR_API_BACKUP_KEEP)}"
+backup_keep="${backup_keep:-3}"
+if [[ ! "$backup_keep" =~ ^[0-9]+$ ]] || (( backup_keep < 1 || backup_keep > 30 )); then
+  echo "STAR_API_BACKUP_KEEP must be an integer between 1 and 30." >&2
+  exit 2
+fi
 
 ghcr_repository() {
   local image="${1#ghcr.io/}"
@@ -122,6 +128,25 @@ retry_command() {
   done
 }
 
+prune_update_space() {
+  local backups_dir="$project_dir/backups"
+  mkdir -p "$backups_dir"
+  if (( backup_keep > 0 )); then
+    find "$backups_dir" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' \
+      | sort -nr \
+      | awk -v keep="$backup_keep" 'NR > keep { sub(/^[^ ]+ /, ""); print }' \
+      | while IFS= read -r old_backup; do
+          [[ "$old_backup" == "$backups_dir"/* ]] && rm -rf -- "$old_backup"
+        done
+  fi
+  docker builder prune --force --filter until=24h >/dev/null 2>&1 || true
+  docker image prune --force >/dev/null 2>&1 || true
+}
+
+backup_assets() {
+  "${compose[@]}" run --rm --no-deps --user 0:0 -v "$backup_dir:/backup" app sh -c 'tar -C /var/lib/star-api/assets -czf /backup/assets.tar.gz .'
+}
+
 if [[ "$requested_version" == "latest" ]]; then
   target_version="$(retry_command "Latest-version discovery from GHCR" 3 8 stable_versions | tail -n 1)"
 else
@@ -154,12 +179,17 @@ compose=(docker compose --env-file "$env_file" -f "$compose_file")
 "${compose[@]}" config --quiet
 "${compose[@]}" ps --status running --quiet postgres | grep -q . || { echo "PostgreSQL is not running; start the current deployment before updating." >&2; exit 1; }
 
+prune_update_space
 backup_id="$(date -u +%Y%m%dT%H%M%SZ)-${current_version}-to-${target_version}"
 backup_dir="$project_dir/backups/$backup_id"
 mkdir -p "$backup_dir"
 echo "Creating update backup: $backup_dir"
 "${compose[@]}" exec -T postgres pg_dump -U starapi -d starapi -Fc > "$backup_dir/database.dump"
-"${compose[@]}" run --rm --no-deps --user 0:0 -v "$backup_dir:/backup" app sh -c 'tar -C /var/lib/star-api/assets -czf /backup/assets.tar.gz .'
+if ! backup_assets; then
+  echo "Asset backup failed. Pruning old backups and Docker cache once before retrying." >&2
+  prune_update_space
+  backup_assets
+fi
 "${compose[@]}" run --rm --no-deps --entrypoint sh -v "$backup_dir:/backup" secrets-init -c 'tar -C /run/star-api-secrets -czf /backup/secrets.tar.gz .'
 cp "$env_file" "$backup_dir/environment.before-update"
 cp "$compose_file" "$backup_dir/compose.before-update.yml"
