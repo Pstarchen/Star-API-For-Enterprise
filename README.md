@@ -51,9 +51,12 @@ npm run production:install
 npm run production:check
 npm run production:update
 npm run production:token
+npm run production:enable-updates
 ```
 
-`production:install` 会在缺少 `.env.production` 时从示例文件创建一份配置，然后拉取镜像并启动服务；正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。升级时只需修改 `.env.production` 中的 `STAR_API_VERSION`，或运行 `npm run production:update -- 0.1.11` 指定版本，即可同步升级应用、迁移器和 PHP Runner。已部署服务器也可运行 `npm run production:check` 检查版本，再执行 `npm run production:update` 自动备份、升级和健康验证。GHCR 发布、Nginx/Caddy 反代、备份和回滚步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
+`production:install` 会在缺少 `.env.production` 时从示例文件创建一份配置，然后拉取镜像并启动服务；正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。升级时只需修改 `.env.production` 中的 `STAR_API_VERSION`，或运行 `npm run production:update -- 0.1.12` 指定版本，即可同步升级应用、迁移器和 PHP Runner。已部署服务器也可运行 `npm run production:check` 检查版本，再执行 `npm run production:update` 自动备份、升级和健康验证。GHCR 发布、Nginx/Caddy 反代、备份和回滚步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
+
+管理员后台的“平台设置 -> 系统安装与更新”可以直接检查最新稳定版本；如需在平台内点击“拉取并更新”，在服务器运行 `npm run production:enable-updates`，按提示粘贴只具备 GitHub Actions workflow dispatch/read 权限的 token。脚本会把 token 写入 `starapi-secrets` 持久卷，并在 `.env.production` 启用 `STAR_API_GITHUB_TOKEN_FILE`。后台会触发仓库现有的 `Deploy production` 工作流，由工作流 SSH 到服务器执行备份、迁移和健康验证。
 
 需要启用数据库时：
 

@@ -17,6 +17,8 @@ Commands:
   update X.Y.Z  Update to a specific stable version.
   check         Check whether a newer stable image is available.
   token         Print the first-install token from the running app container.
+  enable-updates
+                Store a GitHub Actions token in the secrets volume and enable admin UI updates.
   status        Show production container status.
   logs          Follow recent app, migrator, postgres, redis, and php-runner logs.
 
@@ -49,6 +51,24 @@ ensure_env() {
 
 compose() {
   docker compose --env-file "$env_file" -f "$compose_file" "$@"
+}
+
+set_env_value() {
+  local key="$1" value="$2" temp_file
+  temp_file="${env_file}.tmp.$$"
+  if [[ -f "$env_file" ]] && grep -q "^${key}=" "$env_file"; then
+    awk -v key="$key" -v value="$value" '
+      BEGIN { replaced = 0 }
+      $0 ~ "^" key "=" { print key "=" value; replaced = 1; next }
+      { print }
+      END { if (!replaced) print key "=" value }
+    ' "$env_file" > "$temp_file"
+  else
+    cp "$env_file" "$temp_file"
+    printf '\n%s=%s\n' "$key" "$value" >> "$temp_file"
+  fi
+  chmod --reference="$env_file" "$temp_file" 2>/dev/null || chmod 600 "$temp_file" 2>/dev/null || true
+  mv "$temp_file" "$env_file"
 }
 
 command_name="${1:-}"
@@ -85,6 +105,26 @@ case "$command_name" in
     ensure_compose
     [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
     compose exec app node /app/scripts/show-install-token.mjs
+    ;;
+  enable-updates)
+    [[ $# -eq 0 ]] || { usage >&2; exit 2; }
+    ensure_compose
+    [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
+    token="${STAR_API_GITHUB_TOKEN:-}"
+    if [[ -z "$token" ]]; then
+      printf 'GitHub Actions token: ' >&2
+      old_stty="$(stty -g 2>/dev/null || true)"
+      stty -echo 2>/dev/null || true
+      IFS= read -r token
+      [[ -z "$old_stty" ]] || stty "$old_stty" 2>/dev/null || true
+      printf '\n' >&2
+    fi
+    [[ -n "$token" ]] || { echo "GitHub Actions token is required." >&2; exit 1; }
+    printf '%s' "$token" | compose run --rm --no-deps --entrypoint sh -T secrets-init -c 'umask 077; cat > /run/star-api-secrets/GITHUB_ACTIONS_TOKEN'
+    unset token
+    set_env_value STAR_API_GITHUB_TOKEN_FILE /run/star-api-secrets/GITHUB_ACTIONS_TOKEN
+    compose up -d app
+    echo "Platform-admin updates are enabled. Open Admin Settings and use System Install & Update."
     ;;
   status)
     [[ $# -eq 0 ]] || { usage >&2; exit 2; }

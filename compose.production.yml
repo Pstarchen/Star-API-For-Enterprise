@@ -52,6 +52,10 @@ services:
       PHP_RUNNER_URL: http://php-runner:8080/execute
       API_ASSET_STORAGE_PATH: /var/lib/star-api/assets
       MEDIA_MAX_API_GB: ${MEDIA_MAX_API_GB:-100}
+      STAR_API_GITHUB_TOKEN_FILE: ${STAR_API_GITHUB_TOKEN_FILE:-}
+      STAR_API_GITHUB_REPOSITORY: ${STAR_API_GITHUB_REPOSITORY:-Pstarchen/Star-API-For-Enterprise}
+      STAR_API_GITHUB_DEPLOY_WORKFLOW: ${STAR_API_GITHUB_DEPLOY_WORKFLOW:-deploy-production.yml}
+      STAR_API_GITHUB_DEPLOY_REF: ${STAR_API_GITHUB_DEPLOY_REF:-main}
     ports:
       - "${APP_BIND_ADDRESS:-0.0.0.0}:${APP_PORT:-18081}:3000"
     volumes:

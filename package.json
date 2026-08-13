@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -23,6 +23,7 @@
     "production:check": "bash scripts/production.sh check",
     "production:update": "bash scripts/production.sh update",
     "production:token": "bash scripts/production.sh token",
+    "production:enable-updates": "bash scripts/production.sh enable-updates",
     "production:status": "bash scripts/production.sh status",
     "production:logs": "bash scripts/production.sh logs",
     "deploy:baota:init": "bash deploy/baota/init-environment.sh",
