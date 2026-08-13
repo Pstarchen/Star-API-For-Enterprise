@@ -111,6 +111,22 @@ image_manifest_exists() {
     "https://ghcr.io/v2/${image_repository}/manifests/${version}"
 }
 
+image_available_locally() {
+  local image="$1"
+  local version="$2"
+  docker image inspect "$image:$version" >/dev/null 2>&1
+}
+
+pull_image() {
+  local image="$1"
+  local version="$2"
+  if image_available_locally "$image" "$version"; then
+    echo "Image is already present locally: $image:$version"
+    return 0
+  fi
+  timeout "$image_pull_timeout" docker pull "$image:$version"
+}
+
 retry_command() {
   local description="$1"
   local attempts="$2"
@@ -195,9 +211,9 @@ cp "$env_file" "$backup_dir/environment.before-update"
 cp "$compose_file" "$backup_dir/compose.before-update.yml"
 
 echo "Pulling release images while the current application remains online."
-retry_command "Image pull for $app_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$app_image:$target_version"
-retry_command "Image pull for $migrator_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$migrator_image:$target_version"
-retry_command "Image pull for $php_runner_image:$target_version" 5 12 timeout "$image_pull_timeout" docker pull "$php_runner_image:$target_version"
+retry_command "Image pull for $app_image:$target_version" 3 12 pull_image "$app_image" "$target_version"
+retry_command "Image pull for $migrator_image:$target_version" 3 12 pull_image "$migrator_image" "$target_version"
+retry_command "Image pull for $php_runner_image:$target_version" 3 12 pull_image "$php_runner_image" "$target_version"
 
 next_env="${env_file}.star-api-update.$$"
 next_compose="${compose_file}.star-api-update.$$"
