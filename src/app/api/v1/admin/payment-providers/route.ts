@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { epayPaymentTypes } from "@/lib/payment-options";
+import { epayPaymentTypes, epaySubmissionModes } from "@/lib/payment-options";
 import { getCurrentUser } from "@/lib/server/auth";
 import { createPaymentProvider, paymentProviderView, updatePaymentProvider } from "@/lib/server/payment-providers";
 import { prisma } from "@/lib/server/prisma";
@@ -11,6 +11,7 @@ const inputSchema = z.object({
   merchantPid: z.string().trim().min(1).max(100),
   merchantKey: z.string().trim().min(1).max(500).optional(),
   paymentTypes: z.array(z.enum(epayPaymentTypes)).min(1).max(epayPaymentTypes.length),
+  submissionMode: z.enum(epaySubmissionModes).default("REDIRECT"),
   feeRate: z.string().regex(/^\d{1,3}(\.\d{1,4})?$/),
   minAmount: z.string().regex(/^\d{1,9}(\.\d{1,2})?$/),
   maxAmount: z.string().regex(/^\d{1,9}(\.\d{1,2})?$/),

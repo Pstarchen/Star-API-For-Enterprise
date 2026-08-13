@@ -696,6 +696,8 @@ model PaymentOrder {
   paymentType     String?
   externalTradeNo String?
   paymentUrl      String?
+  paymentQrCode   String?
+  paymentScheme   String?
   paidAt          DateTime?
   expiresAt       DateTime?
   createdAt       DateTime           @default(now())
@@ -718,6 +720,7 @@ model PaymentProvider {
   merchantPid          String
   merchantKeyEncrypted Bytes
   paymentTypes         String[]
+  submissionMode       String                      @default("REDIRECT")
   feeRate              Decimal                     @default(0) @db.Decimal(7, 4)
   minAmount            Decimal                     @default(0.01) @db.Decimal(14, 2)
   maxAmount            Decimal                     @default(100000000) @db.Decimal(14, 2)

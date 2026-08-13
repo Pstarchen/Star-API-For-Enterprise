@@ -5,6 +5,7 @@ import YAML from "yaml";
 
 const workflowPath = resolve(".github/workflows/deploy-production.yml");
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
+const ciWorkflow = YAML.parse(readFileSync(resolve(".github/workflows/ci.yml"), "utf8"));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -16,6 +17,12 @@ assert(workflow?.permissions?.contents === "read", "Production workflow must onl
 assert(workflow?.jobs?.deploy?.environment === "production", "Production workflow must use the protected production environment");
 assert(workflow?.jobs?.deploy?.concurrency == null, "Concurrency must be defined at workflow scope");
 assert(Array.isArray(workflow?.jobs?.deploy?.steps), "Production deployment steps are missing");
+assert(Array.isArray(ciWorkflow?.jobs?.quality?.steps), "CI quality steps are missing");
+const qualityCommands = ciWorkflow.jobs.quality.steps.map((step) => step.run).filter(Boolean);
+assert(qualityCommands.includes("npm run test:php-package"), "CI must test PHP package entry discovery");
+assert(qualityCommands.includes("npm run test:upstream"), "CI must test external upstream URL handling");
+const containerNames = ciWorkflow?.jobs?.container?.strategy?.matrix?.include?.map((item) => item.name) ?? [];
+assert(containerNames.includes("app") && containerNames.includes("php-runner"), "CI must build both app and PHP runner images");
 
 const checkout = workflow.jobs.deploy.steps.find((step) => step.uses === "actions/checkout@v4");
 assert(checkout?.with?.["fetch-depth"] === 0, "Production checkout must fetch release tags");

@@ -26,6 +26,7 @@ export async function GET(request: Request) {
   const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, internalHandler: true, executionConfig: true, provider: { select: { ownerTenantId: true } } } });
   if (!product || !isAssetBackedHandler(product.internalHandler)) return Response.json({ code: 404, message: "可管理内容的 API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
+  if (!auth.isAdmin && product.internalHandler === phpHandlerId) return Response.json({ code: 403, message: "PHP 程序包仅平台管理员可以部署" }, { status: 403, headers: noStoreHeaders });
   if (["content.random-image", "content.random-video"].includes(product.internalHandler ?? "")) {
     const kind = product.internalHandler === "content.random-video" ? "VIDEO" : "IMAGE";
     const [assets, total, size] = await Promise.all([
@@ -56,6 +57,7 @@ export async function POST(request: Request) {
   const product = await prisma.apiProduct.findUnique({ where: { id: productId }, select: { id: true, slug: true, internalHandler: true, executionConfig: true, provider: { select: { ownerTenantId: true } }, versions: { orderBy: { version: "desc" }, take: 1, select: { endpoints: { take: 1, select: { id: true, responseFormats: true, responseParameters: { orderBy: { sortOrder: "asc" }, select: { name: true, dataType: true, description: true } } } } } }, _count: { select: { assets: true } } } });
   if (!product || !isAssetBackedHandler(product.internalHandler)) return Response.json({ code: 404, message: "可管理内容的 API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
+  if (!auth.isAdmin && product.internalHandler === phpHandlerId) return Response.json({ code: 403, message: "PHP 程序包仅平台管理员可以部署" }, { status: 403, headers: noStoreHeaders });
   if (["content.random-image", "content.random-video"].includes(product.internalHandler ?? "")) return Response.json({ code: 409, message: "图片和视频请使用流式上传入口" }, { status: 409, headers: noStoreHeaders });
   let assets;
   let normalizedEntry = entryFile;

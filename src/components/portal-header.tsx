@@ -26,17 +26,24 @@ type PortalUser = { name: string; email: string; platformRole: "USER" | "ADMIN" 
 export function PortalHeader({ currentUser, gatewayStatus, overlay = false }: { currentUser: PortalUser | null; gatewayStatus: GatewayStatus; overlay?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [scrollState, setScrollState] = useState<"top" | "down" | "up">("top");
   const lastScrollY = useRef(0);
   const scrollFrame = useRef<number | null>(null);
+  const accountOpenRef = useRef(false);
   const initials = currentUser?.name.slice(0, 1).toUpperCase();
 
   useEffect(() => {
     lastScrollY.current = window.scrollY;
 
     function updateScrollState() {
+      if (accountOpenRef.current) {
+        scrollFrame.current = null;
+        lastScrollY.current = Math.max(window.scrollY, 0);
+        return;
+      }
       const currentScrollY = Math.max(window.scrollY, 0);
       const delta = currentScrollY - lastScrollY.current;
 
@@ -59,16 +66,22 @@ export function PortalHeader({ currentUser, gatewayStatus, overlay = false }: { 
     };
   }, []);
 
+  function handleAccountOpen(nextOpen: boolean) {
+    accountOpenRef.current = nextOpen;
+    setAccountOpen(nextOpen);
+  }
+
   async function logout() {
     setLoggingOut(true);
     await fetch("/api/v1/auth/logout", { method: "POST" }).catch(() => undefined);
-    setOpen(false);
+    setMobileOpen(false);
+    handleAccountOpen(false);
     router.push("/");
     router.refresh();
   }
 
   return <TooltipProvider delayDuration={350}>
-    <header className={cn("portal-header sticky top-0 z-40", overlay && "is-overlay")} data-scroll-state={scrollState}>
+    <header className={cn("portal-header sticky top-0 z-40", overlay && "is-overlay")} data-scroll-state={scrollState} data-account-open={accountOpen ? "true" : undefined}>
       <StatusRail status={gatewayStatus} />
       <div className="portal-bar">
         <div className="container-shell portal-nav">
@@ -81,7 +94,7 @@ export function PortalHeader({ currentUser, gatewayStatus, overlay = false }: { 
 
           <div className="portal-island portal-actions-island relative hidden items-center gap-0.5 lg:flex">
             <Tooltip><TooltipTrigger asChild><ThemeToggle className="portal-action-control portal-theme-control grid place-items-center text-[var(--muted)] hover:bg-[var(--surface-subtle)] hover:text-[var(--ink)]" /></TooltipTrigger><TooltipContent>切换深浅色模式</TooltipContent></Tooltip>
-            {currentUser ? <DropdownMenu>
+            {currentUser ? <DropdownMenu modal={false} open={accountOpen} onOpenChange={handleAccountOpen}>
               <DropdownMenuTrigger asChild><button type="button" className="portal-account-trigger"><Avatar className="size-7"><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong>{currentUser.name}</strong><small>{currentUser.platformRole === "ADMIN" ? "平台管理员" : "开发者账号"}</small></span><ChevronDown className="size-3.5 shrink-0 text-[var(--muted)]" /></button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64"><DropdownMenuLabel className="py-2"><strong className="block truncate text-xs text-[var(--ink)]">{currentUser.name}</strong><span className="mt-1 block truncate text-[11px] font-normal text-[var(--muted)]">{currentUser.email}</span></DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem asChild><Link href="/console"><LayoutDashboard className="text-[var(--brand)]" />开发者控制台</Link></DropdownMenuItem><DropdownMenuItem asChild><Link href="/console/settings"><Settings />账号与企业设置</Link></DropdownMenuItem>{currentUser.platformRole === "ADMIN" && <DropdownMenuItem asChild><Link href="/admin"><ShieldCheck className="text-[var(--accent)]" />平台运营后台</Link></DropdownMenuItem>}<DropdownMenuSeparator /><DropdownMenuItem onSelect={logout} disabled={loggingOut} className="text-[var(--danger)] focus:text-[var(--danger)]"><LogOut />{loggingOut ? "正在退出" : "退出登录"}</DropdownMenuItem></DropdownMenuContent>
             </DropdownMenu> : <><Button asChild variant="ghost" size="sm" className="portal-action-control"><Link href="/login">登录</Link></Button><Button asChild size="sm" className="portal-action-control"><Link href="/register">免费注册</Link></Button></>}
@@ -89,14 +102,14 @@ export function PortalHeader({ currentUser, gatewayStatus, overlay = false }: { 
 
           <div className="portal-island portal-mobile-island flex items-center lg:hidden">
             <BrandMark />
-            <Button type="button" variant="ghost" size="icon" className="ml-auto" onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-label={open ? "关闭导航菜单" : "打开导航菜单"}>{open ? <X /> : <Menu />}</Button>
+            <Button type="button" variant="ghost" size="icon" className="ml-auto" onClick={() => setMobileOpen((value) => !value)} aria-expanded={mobileOpen} aria-label={mobileOpen ? "关闭导航菜单" : "打开导航菜单"}>{mobileOpen ? <X /> : <Menu />}</Button>
           </div>
         </div>
 
-        {open && <nav className="portal-mobile-menu container-shell grid gap-1 py-3 lg:hidden" aria-label="移动端主导航">{links.map((item) => {
+        {mobileOpen && <nav className="portal-mobile-menu container-shell grid gap-1 py-3 lg:hidden" aria-label="移动端主导航">{links.map((item) => {
           const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-          return <Link key={item.href} href={item.href} onClick={() => setOpen(false)} className={cn("flex h-11 items-center gap-3 rounded-[7px] px-3 text-sm font-medium transition hover:bg-[var(--surface-subtle)]", active && "bg-[var(--brand-soft)] text-[var(--brand-strong)]")}><item.icon className="size-4" />{item.label}</Link>;
-        })}{currentUser ? <div className="mt-2 border-t border-[var(--line)] pt-3"><div className="flex items-center gap-2 px-2 pb-2"><Avatar><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong className="block truncate text-xs">{currentUser.name}</strong><small className="block truncate text-[11px] text-[var(--muted)]">{currentUser.email}</small></span><ThemeToggle className="ml-auto grid size-9 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /></div><div className="grid grid-cols-2 gap-1"><MobileAccountLink href="/console" icon={LayoutDashboard} label="控制台" close={() => setOpen(false)} />{currentUser.platformRole === "ADMIN" && <MobileAccountLink href="/admin" icon={ShieldCheck} label="运营后台" close={() => setOpen(false)} />}<MobileAccountLink href="/console/settings" icon={Settings} label="账号设置" close={() => setOpen(false)} /><button type="button" onClick={logout} disabled={loggingOut} className="flex h-10 items-center gap-2 rounded-[7px] px-2 text-left text-xs text-[var(--danger)] transition hover:bg-[var(--danger-soft)] disabled:opacity-50"><LogOut className="size-3.5" />退出登录</button></div></div> : <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-3"><ThemeToggle className="grid size-10 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /><Button asChild variant="secondary" className="flex-1"><Link href="/login" onClick={() => setOpen(false)}>登录</Link></Button><Button asChild className="flex-1"><Link href="/register" onClick={() => setOpen(false)}>免费注册</Link></Button></div>}</nav>}
+          return <Link key={item.href} href={item.href} onClick={() => setMobileOpen(false)} className={cn("flex h-11 items-center gap-3 rounded-[7px] px-3 text-sm font-medium transition hover:bg-[var(--surface-subtle)]", active && "bg-[var(--brand-soft)] text-[var(--brand-strong)]")}><item.icon className="size-4" />{item.label}</Link>;
+        })}{currentUser ? <div className="mt-2 border-t border-[var(--line)] pt-3"><div className="flex items-center gap-2 px-2 pb-2"><Avatar><AvatarFallback>{initials}</AvatarFallback></Avatar><span className="min-w-0"><strong className="block truncate text-xs">{currentUser.name}</strong><small className="block truncate text-[11px] text-[var(--muted)]">{currentUser.email}</small></span><ThemeToggle className="ml-auto grid size-9 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /></div><div className="grid grid-cols-2 gap-1"><MobileAccountLink href="/console" icon={LayoutDashboard} label="控制台" close={() => setMobileOpen(false)} />{currentUser.platformRole === "ADMIN" && <MobileAccountLink href="/admin" icon={ShieldCheck} label="运营后台" close={() => setMobileOpen(false)} />}<MobileAccountLink href="/console/settings" icon={Settings} label="账号设置" close={() => setMobileOpen(false)} /><button type="button" onClick={logout} disabled={loggingOut} className="flex h-10 items-center gap-2 rounded-[7px] px-2 text-left text-xs text-[var(--danger)] transition hover:bg-[var(--danger-soft)] disabled:opacity-50"><LogOut className="size-3.5" />退出登录</button></div></div> : <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-3"><ThemeToggle className="grid size-10 place-items-center rounded-[7px] border border-[var(--line)] text-[var(--muted)]" /><Button asChild variant="secondary" className="flex-1"><Link href="/login" onClick={() => setMobileOpen(false)}>登录</Link></Button><Button asChild className="flex-1"><Link href="/register" onClick={() => setMobileOpen(false)}>免费注册</Link></Button></div>}</nav>}
       </div>
     </header>
   </TooltipProvider>;

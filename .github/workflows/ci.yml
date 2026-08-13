@@ -25,6 +25,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate
+      - run: npm run test:php-package
+      - run: npm run test:upstream
       - run: npm run test:epay
       - run: npm run test:production-updater
       - run: npm run test:workflows
@@ -33,15 +35,27 @@ jobs:
       - run: npm run build
 
   container:
-    name: Docker image
+    name: Docker image (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: app
+            context: .
+            file: Dockerfile
+            tag: star-api-platform:ci
+          - name: php-runner
+            context: ./php-runner
+            file: ./php-runner/Dockerfile
+            tag: star-api-php-runner:ci
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: false
-          tags: star-api-platform:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ matrix.tag }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

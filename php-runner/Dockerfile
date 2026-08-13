@@ -1,7 +1,10 @@
 ARG ALPINE_IMAGE=m.daocloud.io/docker.io/library/alpine:3.20
 FROM ${ALPINE_IMAGE}
 
-RUN apk add --no-cache php83 php83-cgi
+# PHP packages uploaded by administrators are allowed to call common PHP
+# extensions. curl is required for proxy-style APIs that call an upstream
+# service from the PHP entry point.
+RUN apk add --no-cache php83 php83-cgi php83-curl
 
 WORKDIR /runner
 COPY server.php /runner/server.php

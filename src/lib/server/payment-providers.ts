@@ -3,7 +3,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { decryptJson, encryptJson } from "@/lib/server/encryption";
 import { normalizeEpayGatewayUrl } from "@/lib/epay";
-import { epayPaymentTypes, type EpayPaymentType } from "@/lib/payment-options";
+import { epayPaymentTypes, epaySubmissionModes, type EpayPaymentType, type EpaySubmissionMode } from "@/lib/payment-options";
 import { prisma } from "@/lib/server/prisma";
 import { assertSafeUpstream } from "@/lib/server/upstream";
 
@@ -13,6 +13,7 @@ export type PaymentProviderInput = {
   merchantPid: string;
   merchantKey?: string;
   paymentTypes: EpayPaymentType[];
+  submissionMode?: EpaySubmissionMode;
   feeRate: string;
   minAmount: string;
   maxAmount: string;
@@ -28,6 +29,7 @@ export function paymentProviderView(provider: {
   merchantPid: string;
   merchantKeyEncrypted: Uint8Array;
   paymentTypes: string[];
+  submissionMode: string;
   feeRate: Prisma.Decimal;
   minAmount: Prisma.Decimal;
   maxAmount: Prisma.Decimal;
@@ -41,6 +43,9 @@ export function paymentProviderView(provider: {
   updatedAt: Date;
   _count?: { orders: number };
 }) {
+  const submissionMode: EpaySubmissionMode = epaySubmissionModes.includes(provider.submissionMode as EpaySubmissionMode)
+    ? provider.submissionMode as EpaySubmissionMode
+    : "REDIRECT";
   return {
     id: provider.id,
     name: provider.name,
@@ -48,6 +53,7 @@ export function paymentProviderView(provider: {
     merchantPid: provider.merchantPid,
     merchantKeyConfigured: provider.merchantKeyEncrypted.length > 0,
     paymentTypes: provider.paymentTypes,
+    submissionMode,
     feeRate: provider.feeRate.toString(),
     minAmount: provider.minAmount.toString(),
     maxAmount: provider.maxAmount.toString(),
@@ -83,6 +89,7 @@ export async function normalizePaymentProviderInput(input: PaymentProviderInput)
   const merchantKey = input.merchantKey?.trim();
   const description = input.description?.trim() || null;
   const paymentTypes = [...new Set(input.paymentTypes)].filter((value): value is EpayPaymentType => epayPaymentTypes.includes(value));
+  const submissionMode = input.submissionMode ?? "REDIRECT";
   const feeRate = new Prisma.Decimal(input.feeRate);
   const minAmount = new Prisma.Decimal(input.minAmount);
   const maxAmount = new Prisma.Decimal(input.maxAmount);
@@ -91,7 +98,7 @@ export async function normalizePaymentProviderInput(input: PaymentProviderInput)
   if (feeRate.lt(0) || feeRate.gt(100)) throw new Error("EPAY_FEE_INVALID");
   if (minAmount.lt("0.01") || maxAmount.gt("100000000") || maxAmount.lt(minAmount)) throw new Error("EPAY_AMOUNT_RANGE_INVALID");
   await assertSafeUpstream(gatewayUrl, "PUBLIC_API");
-  return { name, gatewayUrl, merchantPid, merchantKey, paymentTypes, feeRate, minAmount, maxAmount, sortOrder: input.sortOrder, enabled: input.enabled, description };
+  return { name, gatewayUrl, merchantPid, merchantKey, paymentTypes, submissionMode, feeRate, minAmount, maxAmount, sortOrder: input.sortOrder, enabled: input.enabled, description };
 }
 
 export async function createPaymentProvider(input: PaymentProviderInput) {

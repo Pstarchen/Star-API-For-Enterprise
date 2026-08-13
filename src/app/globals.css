@@ -481,7 +481,7 @@ a:not([class]) { color: inherit; }
 
 .portal-brand-island { flex: 0 0 auto; padding-inline: 10px 13px; }
 .portal-links-island { flex: 0 0 auto; padding-inline: 5px; }
-.portal-actions-island { flex: 0 0 auto; padding-inline: 5px; }
+.portal-actions-island { flex: 0 0 auto; padding-inline: 5px; overflow: visible; }
 .portal-nav-link,
 .portal-actions-island .portal-action-control {
   height: 36px;
@@ -509,6 +509,16 @@ a:not([class]) { color: inherit; }
 }
 
 .portal-header[data-scroll-state="down"] .portal-island {
+  border-color: color-mix(in srgb, var(--brand-line) 72%, var(--line));
+  box-shadow: 0 8px 24px rgb(31 39 67 / 16%), inset 0 1px 0 rgb(255 255 255 / 78%);
+}
+
+.portal-header[data-account-open="true"] .portal-nav {
+  transform: none;
+  animation: none;
+}
+
+.portal-header[data-account-open="true"] .portal-island {
   border-color: color-mix(in srgb, var(--brand-line) 72%, var(--line));
   box-shadow: 0 8px 24px rgb(31 39 67 / 16%), inset 0 1px 0 rgb(255 255 255 / 78%);
 }

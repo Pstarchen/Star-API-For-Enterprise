@@ -111,7 +111,9 @@ services:
       secrets-init:
         condition: service_completed_successfully
     networks:
-      - execution
+      execution:
+      php-egress:
+        gw_priority: 1
 
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
@@ -154,6 +156,7 @@ networks:
     internal: true
   execution:
     internal: true
+  php-egress:
 
 volumes:
   starapi-secrets:

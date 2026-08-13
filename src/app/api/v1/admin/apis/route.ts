@@ -170,7 +170,7 @@ export async function POST(request: Request) {
   try { payload = await requestInput(request); } catch { return Response.json({ code: 400, message: "API 创建请求格式不正确" }, { status: 400, headers: noStoreHeaders }); }
   if (!payload.parsed.success) return Response.json({ code: 400, message: "请检查标红的 API 配置", details: z.flattenError(payload.parsed.error) }, { status: 400, headers: noStoreHeaders });
   const input = payload.parsed.data;
-  if (!auth.isAdmin && input.sourceType === "SERVER_LOCAL") return Response.json({ code: 403, message: "服务器内网服务仅平台管理员可以配置；服务商可使用公网或临时穿透上游" }, { status: 403, headers: noStoreHeaders });
+  if (!auth.isAdmin && ["SERVER_LOCAL", "PHP_PACKAGE"].includes(input.sourceType)) return Response.json({ code: 403, message: input.sourceType === "PHP_PACKAGE" ? "PHP 程序包仅平台管理员可以部署；服务商请使用公网 API 接入" : "服务器内网服务仅平台管理员可以配置；服务商可使用公网或临时穿透上游" }, { status: 403, headers: noStoreHeaders });
   const handler = contentHandler(input.sourceType);
   const effectiveMethods = input.methods;
   const [slugConflict, routeConflict] = await Promise.all([

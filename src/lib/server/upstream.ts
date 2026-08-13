@@ -2,6 +2,7 @@ import "server-only";
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
+import { mergeUpstreamQuery, upstreamHealthTarget } from "@/lib/upstream-url";
 
 type UpstreamKind = "PUBLIC_API" | "SERVER_LOCAL" | "TUNNEL";
 const redirectStatuses = new Set([301, 302, 303, 307, 308]);
@@ -117,7 +118,7 @@ async function fetchWithSafeRedirects(input: {
 
 export async function checkUpstreamHealth(input: { baseUrl: string; healthPath: string; timeoutMs: number; kind: UpstreamKind }) {
   const base = await assertSafeUpstream(input.baseUrl, input.kind);
-  const target = new URL(input.healthPath.replace(/^\/+/, ""), `${base.toString().replace(/\/+$/, "")}/`);
+  const target = upstreamHealthTarget(base.toString(), input.healthPath);
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -151,7 +152,7 @@ export async function forwardRequest(input: {
   const target = input.relativePath === ""
     ? new URL(base)
     : new URL(input.relativePath.replace(/^\/+/, ""), `${base.toString().replace(/\/+$/, "")}/`);
-  if (input.query) target.search = input.query;
+  mergeUpstreamQuery(target, input.query);
   const headers = new Headers({ Accept: "*/*", "User-Agent": "Star-API-Gateway/1.0", "X-Star-Request-Id": input.requestId });
   if (input.contentType) headers.set("Content-Type", input.contentType);
   if (input.authType === "BEARER" && typeof input.secrets.token === "string") headers.set("Authorization", `Bearer ${input.secrets.token}`);
