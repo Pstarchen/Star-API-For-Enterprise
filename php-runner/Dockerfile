@@ -2,9 +2,9 @@ ARG ALPINE_IMAGE=m.daocloud.io/docker.io/library/alpine:3.20
 FROM ${ALPINE_IMAGE}
 
 # PHP packages uploaded by administrators are allowed to call common PHP
-# extensions. curl is required for proxy-style APIs that call an upstream
-# service from the PHP entry point.
-RUN apk add --no-cache php83 php83-cgi php83-curl
+# extensions used by small API scripts. curl and openssl cover upstream HTTP
+# calls; mbstring/iconv/json/fileinfo improve compatibility with older samples.
+RUN apk add --no-cache php83 php83-cgi php83-curl php83-fileinfo php83-iconv php83-mbstring php83-openssl
 
 WORKDIR /runner
 COPY server.php /runner/server.php

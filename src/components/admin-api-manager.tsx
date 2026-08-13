@@ -39,6 +39,57 @@ const sourceOptions = [
   { id: "BUILTIN", name: "内置工具", description: "时间、UUID、摘要和文本转换等工具", icon: WandSparkles, tone: "bg-[var(--surface-subtle)] text-[var(--ink)]" },
 ] as const;
 
+type MediaUploadSummary = { uploaded: number; duplicates: number; skipped: string[] };
+
+async function fileChecksum(file: File) {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function uniqueMediaFiles(files: File[]) {
+  const seen = new Set<string>();
+  const unique: File[] = [];
+  const skipped: string[] = [];
+  for (const file of files) {
+    const checksum = await fileChecksum(file);
+    if (seen.has(checksum)) {
+      skipped.push(`${file.name}：与本次选择的其他文件重复`);
+      continue;
+    }
+    seen.add(checksum);
+    unique.push(file);
+  }
+  return { unique, skipped };
+}
+
+async function uploadMediaFiles(productId: string, files: File[], progress: (uploaded: number, total: number, name: string) => void): Promise<MediaUploadSummary> {
+  const deduped = await uniqueMediaFiles(files);
+  const summary: MediaUploadSummary = { uploaded: 0, duplicates: 0, skipped: deduped.skipped };
+  for (const file of deduped.unique) {
+    progress(summary.uploaded + summary.duplicates + 1, deduped.unique.length, file.name);
+    try {
+      const response = await fetch(`/api/v1/admin/apis/media?productId=${encodeURIComponent(productId)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
+      const result = await response.json();
+      if (!response.ok) {
+        summary.skipped.push(`${file.name}：${result.message || "上传失败"}`);
+        continue;
+      }
+      if (result.data?.duplicate) summary.duplicates += 1;
+      else summary.uploaded += 1;
+    } catch {
+      summary.skipped.push(`${file.name}：无法连接媒体上传服务`);
+    }
+  }
+  return summary;
+}
+
+function mediaUploadMessage(summary: MediaUploadSummary) {
+  const parts = [`成功上传 ${summary.uploaded} 个文件`];
+  if (summary.duplicates) parts.push(`跳过 ${summary.duplicates} 个重复文件`);
+  if (summary.skipped.length) parts.push(`过滤 ${summary.skipped.length} 个无效文件`);
+  return parts.join("，");
+}
+
 export function AdminApiManager({ initialApis, initialCategories, defaultPublicHost, defaultPublicUrl, canPublish = true }: { initialApis: CatalogProduct[]; initialCategories: ApiCategoryOption[]; defaultPublicHost: string; defaultPublicUrl: string; canPublish?: boolean }) {
   const [apis, setApis] = useState(initialApis);
   const [categories, setCategories] = useState(initialCategories);
@@ -126,7 +177,7 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
       defaultQpsLimit: value("defaultQpsLimit") || 10,
       sla: value("sla") || 99.9,
       content: value("content"),
-      entryFile: value("entryFile") || "index.php",
+      entryFile: value("entryFile"),
       parameters,
       responseParameters,
       responseFormats,
@@ -143,24 +194,16 @@ export function AdminApiManager({ initialApis, initialCategories, defaultPublicH
         const fieldErrors = result.details?.fieldErrors ? Object.values(result.details.fieldErrors).flat().filter(Boolean).join("；") : "";
         setError(fieldErrors || result.message || "API 创建失败"); return;
       }
-      let uploaded = 0;
-      let uploadFailure = "";
+      let uploadSummary: MediaUploadSummary = { uploaded: 0, duplicates: 0, skipped: [] };
       if (mediaFiles.length) {
-        for (const file of mediaFiles) {
-          setUploadProgress(`正在上传 ${uploaded + 1} / ${mediaFiles.length}：${file.name}`);
-          try {
-            const mediaResponse = await fetch(`/api/v1/admin/apis/media?productId=${encodeURIComponent(result.data.id)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
-            const mediaResult = await mediaResponse.json();
-            if (!mediaResponse.ok) { uploadFailure = `${file.name}：${mediaResult.message || "上传失败"}`; break; }
-            uploaded += 1;
-          } catch { uploadFailure = `${file.name}：无法连接媒体上传服务`; break; }
-        }
+        uploadSummary = await uploadMediaFiles(result.data.id, mediaFiles, (current, total, name) => setUploadProgress(`正在上传 ${current} / ${total}：${name}`));
       }
+      const uploaded = uploadSummary.uploaded;
       const created = { ...result.data, assetCount: uploaded || result.data.assetCount };
       setApis((current) => [created, ...current]);
-      setNotice(uploaded ? `${created.name} 已创建，成功上传 ${uploaded} 个媒体文件` : `${created.name} 已创建为草稿`);
+      setNotice(uploaded || uploadSummary.duplicates || uploadSummary.skipped.length ? `${created.name} 已创建，${mediaUploadMessage(uploadSummary)}` : `${created.name} 已创建为草稿`);
       setDialogOpen(false);
-      if (uploadFailure) setError(`API 草稿已保留，已上传 ${uploaded} 个文件；${uploadFailure}。可在“管理返回内容”中继续上传。`);
+      if (uploadSummary.skipped.length) setError(`API 草稿已保留；${uploadSummary.skipped.slice(0, 3).join("；")}${uploadSummary.skipped.length > 3 ? `；另有 ${uploadSummary.skipped.length - 3} 个文件已过滤` : ""}。可在“管理返回内容”中继续上传。`);
     } catch { setError("无法连接 API 管理服务"); }
     finally { setSaving(false); setUploadProgress(""); }
   }
@@ -305,7 +348,7 @@ function SourceFields(props: { sourceType: SourceType; quick: boolean; authType:
   if (props.sourceType === "RANDOM_TEXT") return <div className="space-y-4"><Field label="文本内容"><textarea name="content" rows={7} className={textareaClass} placeholder={"每行一条内容\n调用时会随机返回其中一行\n也可以只上传 TXT 文件"} /></Field><FileUploadField name="assets" accept=".txt,text/plain" multiple title="上传 TXT 文件（可选）" description="支持选择一个或多个纯文本文件；每个非空行会成为一条随机返回内容" icon={<Type />} /></div>;
   if (props.sourceType === "STATIC_JSON") return <div className="space-y-4"><Field label="JSON 内容"><textarea name="content" rows={9} className={`${textareaClass} mono`} placeholder={'{\n  "message": "hello",\n  "success": true\n}'} /></Field><FileUploadField name="assets" accept=".json,application/json" title="上传 JSON 文件（可选）" description="选择文件后将校验 JSON 语法；文本框内容与文件二选一即可" icon={<Braces />} /></div>;
   if (props.sourceType === "DATASET") return <div className="space-y-4"><FileUploadField name="assets" required accept="*/*" multiple title="导入本地数据文件或 ZIP" description="支持 JSON、JSONL、CSV、TSV、YAML、逐行文本及其 ZIP 数据包；未知扩展名会按真实内容识别" icon={<Database />} /><div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><Field label="多文件组织方式"><Select name="datasetGrouping" defaultValue="FILE"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="FILE">按文件名分组</SelectItem><SelectItem value="MERGED">合并为一个内容池</SelectItem></SelectContent></Select></Field><Field label="分类参数名" optional><input name="datasetCategoryParameter" defaultValue="category" className={inputClass} placeholder="留空不启用分类" /></Field><Field label="格式参数名" optional><input name="datasetFormatParameter" defaultValue="format" className={inputClass} placeholder="留空使用 Accept 请求头" /></Field><Field label="分类列表触发值" optional><input name="datasetMenuValue" defaultValue="list" className={inputClass} placeholder="留空不提供列表值" /></Field><Field label="默认返回格式"><Select name="datasetDefaultFormat" defaultValue="JSON"><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="JSON">JSON</SelectItem><SelectItem value="TXT">TXT</SelectItem></SelectContent></Select></Field><Field label="文本字段路径" optional><input name="datasetTextField" className={inputClass} placeholder="例如 content.text；留空自动识别" /></Field><Field label="记录集合路径" optional><input name="datasetItemsPath" className={inputClass} placeholder="例如 data.items；留空自动查找" /></Field></div><p className="text-[9px] leading-4 text-[var(--muted)]">不填写请求与返回参数时，平台会从真实记录自动生成可编辑契约和返回示例。ZIP 内可放多级目录和不同数据格式，目录与文件名仅用于分组，不限制业务字段。</p></div>;
-  if (props.sourceType === "PHP_PACKAGE") return <div className="space-y-4"><FileUploadField name="assets" required accept=".zip,application/zip,application/x-zip-compressed" title="选择 PHP 程序包" description="上传包含 PHP 源码与附属文件的 ZIP；程序会在独立受限容器内运行" icon={<FileCode2 />} /><Field label="入口文件" optional><input name="entryFile" className={inputClass} placeholder="留空自动发现，例如 project/index.php" /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">ZIP 可以包含一层或多层项目目录。留空时平台会查找唯一入口或 index.php、api.php、main.php、app.php。</p></div>;
+  if (props.sourceType === "PHP_PACKAGE") return <div className="space-y-4"><FileUploadField name="assets" required accept=".zip,.php,application/zip,application/x-zip-compressed,application/x-httpd-php,text/x-php,text/plain" title="选择 PHP 程序包或单个 PHP 文件" description="支持 ZIP 程序包，也支持直接上传 index.php；程序会在独立受限容器内运行" icon={<FileCode2 />} /><Field label="入口文件" optional><input name="entryFile" className={inputClass} placeholder="留空自动发现，例如 project/index.php" /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">ZIP 可以包含一层或多层项目目录。留空时平台会查找唯一入口或 index.php、api.php、main.php、app.php。</p></div>;
   if (["EXTERNAL", "SERVER_LOCAL", "TUNNEL"].includes(props.sourceType)) {
     const local = props.sourceType === "SERVER_LOCAL";
     const tunnel = props.sourceType === "TUNNEL";
@@ -403,17 +446,10 @@ function ContentManager({ api, close, changed }: { api: CatalogProduct; close: (
     const media = ["content.random-image", "content.random-video"].includes(api.internalHandler ?? "");
     if (media) {
       const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
-      let uploaded = 0;
-      for (const file of files) {
-        setMessage(`正在上传 ${uploaded + 1} / ${files.length}：${file.name}`);
-        try {
-          const response = await fetch(`/api/v1/admin/apis/media?productId=${encodeURIComponent(api.id)}`, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-File-Name": encodeURIComponent(file.name) }, body: file });
-          const result = await response.json();
-          if (!response.ok) { setError(`${file.name}：${result.message || "上传失败"}`); break; }
-          uploaded += 1;
-        } catch { setError(`${file.name}：无法连接媒体上传服务`); break; }
-      }
-      if (uploaded) { setMessage(`已上传 ${uploaded} 个媒体文件`); setMediaInputKey((value) => value + 1); await refresh().catch((error) => setError(error.message)); }
+      const summary = await uploadMediaFiles(api.id, files, (current, total, name) => setMessage(`正在上传 ${current} / ${total}：${name}`));
+      if (summary.uploaded || summary.duplicates || summary.skipped.length) setMessage(mediaUploadMessage(summary));
+      if (summary.skipped.length) setError(summary.skipped.slice(0, 5).join("；") + (summary.skipped.length > 5 ? `；另有 ${summary.skipped.length - 5} 个文件已过滤` : ""));
+      if (summary.uploaded || summary.duplicates) { setMediaInputKey((value) => value + 1); await refresh().catch((error) => setError(error.message)); }
       setSaving(false); return;
     }
     form.append("productId", api.id);
@@ -436,7 +472,7 @@ function ContentManager({ api, close, changed }: { api: CatalogProduct; close: (
     finally { setDeleting(false); }
   }
   const handler = api.internalHandler;
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4" onMouseDown={close}><div className="mx-auto my-6 w-full max-w-3xl overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">{handler === phpHandlerId ? "管理 PHP 程序包" : "管理返回内容"}</h3><p className="mt-1 text-[9px] text-[var(--muted)]">{api.name} · 当前 {total} 项</p></div><button onClick={close} className="grid size-10 place-items-center rounded-[7px] hover:bg-[var(--surface-subtle)] lg:size-8" aria-label="关闭"><X className="size-4" /></button></div><form onSubmit={add} className="space-y-4 border-b border-[var(--line)] p-5">{handler === "content.random-image" && <FileUploadField key={`image-${mediaInputKey}`} name="assets" required accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple title="继续添加图片" description="不设单文件上限；平台会校验真实图片格式后写入本地持久卷" icon={<FileImage />} />}{handler === "content.random-video" && <FileUploadField key={`video-${mediaInputKey}`} name="assets" required accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,.mp4,.m4v,.webm,.mov,.mkv,.avi" multiple title="继续添加视频" description="支持批量选择并逐个流式上传；视频支持 Range 分段播放" icon={<FileVideo />} />}{handler === "content.random-text" && <><Field label="继续添加文本"><textarea name="content" rows={4} className={textareaClass} placeholder="每行一条" /></Field><FileUploadField key={`text-${mediaInputKey}`} name="assets" accept=".txt,text/plain" multiple title="上传 TXT 文件（可选）" description="支持一个或多个纯文本文件；每个非空行会加入随机内容池" icon={<Type />} /></>}{handler === "content.static-json" && <><Field label="替换 JSON 响应"><textarea name="content" rows={7} className={`${textareaClass} mono`} placeholder={'{"message":"updated"}'} /></Field><FileUploadField key={`json-${mediaInputKey}`} name="assets" accept=".json,application/json" title="上传 JSON 文件（可选）" description="文件通过 JSON 语法校验后会替换当前响应内容" icon={<Braces />} /></>}{handler === "content.dataset" && <><FileUploadField key={`dataset-${mediaInputKey}`} name="assets" required accept="*/*" multiple title="替换通用数据源" description="支持单独文件或 ZIP 数据包；未知扩展名按内容识别，全部校验通过后原子替换" icon={<Database />} /><p className="text-[9px] leading-4 text-[var(--muted)]">文件分组、记录集合路径、文本字段和筛选参数可在 API 配置中心调整。</p></>}{handler === phpHandlerId && <><FileUploadField key={`php-${mediaInputKey}`} name="assets" required accept=".zip,application/zip,application/x-zip-compressed" title="替换整个 PHP 程序包" description="选择包含 PHP 源码与附属文件的 ZIP；程序会在独立受限容器内运行" icon={<FileCode2 />} /><Field label="入口文件" optional><input name="entryFile" value={entryFile} onChange={(event) => setEntryFile(event.target.value)} className={inputClass} placeholder="留空自动发现" /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">当前入口会自动回填；新 ZIP 校验通过后原子替换。ZIP 目录变化时可留空重新发现入口。</p></>}{message && <p role="status" className="rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2 text-[10px] text-[var(--aqua)]">{message}</p>}{error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}<button disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-[8px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-60 lg:h-9">{saving ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}{handler === phpHandlerId ? "部署新程序包" : handler === "content.static-json" ? "更新 JSON" : handler === "content.dataset" ? "替换数据源" : saving && ["content.random-image", "content.random-video"].includes(handler ?? "") ? "正在上传" : "添加内容"}</button></form>{total > (assets?.length ?? 0) && <div className="border-b border-[var(--line)] px-5 py-2 text-[9px] text-[var(--muted)]">当前显示最近 {assets?.length ?? 0} 项，共 {total} 项</div>}<div className="max-h-80 overflow-y-auto divide-y divide-[var(--line)]">{assets?.map((asset) => <div key={asset.id} className="flex items-center gap-3 px-5 py-3"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--surface-subtle)]">{asset.kind === "IMAGE" ? <FileImage className="size-4" /> : asset.kind === "VIDEO" ? <FileVideo className="size-4" /> : asset.kind === "JSON" ? <Braces className="size-4" /> : asset.kind === "DATASET" ? <Database className="size-4" /> : asset.kind === "PHP_SOURCE" ? <FileCode2 className="size-4" /> : <Type className="size-4" />}</span><div className="min-w-0 flex-1"><strong className="block truncate text-[10px]">{asset.preview || asset.name}</strong><span className="mt-0.5 block text-[8px] text-[var(--muted)]">{formatBytes(asset.size)} · {new Date(asset.createdAt).toLocaleString("zh-CN")}</span></div>{handler !== phpHandlerId && <button onClick={() => { setDeleteTarget(asset); setDeleteError(""); }} className="grid size-10 place-items-center rounded-[7px] text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] lg:size-8" aria-label={`删除 ${asset.name}`}><Trash2 className="size-3.5" /></button>}</div>)}{assets?.length === 0 && <div className="py-12 text-center text-[10px] text-[var(--muted)]">当前没有可返回的内容</div>}{assets === null && !error && <div className="grid place-items-center py-12"><Loader2 className="size-5 animate-spin text-[var(--brand)]" /></div>}</div></div>{deleteTarget && <ConfirmDialog open title="删除返回内容？" description={deleteTarget.preview || deleteTarget.name} detail="删除后该内容不会再被接口返回，操作不可撤销。" busy={deleting} error={deleteError} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteError(""); } }} onConfirm={remove} />}</div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-black/45 p-4" onMouseDown={close}><div className="mx-auto my-6 w-full max-w-3xl overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface)] shadow-2xl" onMouseDown={(event) => event.stopPropagation()}><div className="flex items-center justify-between border-b border-[var(--line)] px-5 py-4"><div><h3 className="text-[14px] font-bold">{handler === phpHandlerId ? "管理 PHP 程序包" : "管理返回内容"}</h3><p className="mt-1 text-[9px] text-[var(--muted)]">{api.name} · 当前 {total} 项</p></div><button onClick={close} className="grid size-10 place-items-center rounded-[7px] hover:bg-[var(--surface-subtle)] lg:size-8" aria-label="关闭"><X className="size-4" /></button></div><form onSubmit={add} className="space-y-4 border-b border-[var(--line)] p-5">{handler === "content.random-image" && <FileUploadField key={`image-${mediaInputKey}`} name="assets" required accept="image/png,image/jpeg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif" multiple title="继续添加图片" description="不设单文件上限；平台会校验真实图片格式后写入本地持久卷" icon={<FileImage />} />}{handler === "content.random-video" && <FileUploadField key={`video-${mediaInputKey}`} name="assets" required accept="video/mp4,video/webm,video/quicktime,video/x-matroska,video/x-msvideo,.mp4,.m4v,.webm,.mov,.mkv,.avi" multiple title="继续添加视频" description="支持批量选择并逐个流式上传；视频支持 Range 分段播放" icon={<FileVideo />} />}{handler === "content.random-text" && <><Field label="继续添加文本"><textarea name="content" rows={4} className={textareaClass} placeholder="每行一条" /></Field><FileUploadField key={`text-${mediaInputKey}`} name="assets" accept=".txt,text/plain" multiple title="上传 TXT 文件（可选）" description="支持一个或多个纯文本文件；每个非空行会加入随机内容池" icon={<Type />} /></>}{handler === "content.static-json" && <><Field label="替换 JSON 响应"><textarea name="content" rows={7} className={`${textareaClass} mono`} placeholder={'{"message":"updated"}'} /></Field><FileUploadField key={`json-${mediaInputKey}`} name="assets" accept=".json,application/json" title="上传 JSON 文件（可选）" description="文件通过 JSON 语法校验后会替换当前响应内容" icon={<Braces />} /></>}{handler === "content.dataset" && <><FileUploadField key={`dataset-${mediaInputKey}`} name="assets" required accept="*/*" multiple title="替换通用数据源" description="支持单独文件或 ZIP 数据包；未知扩展名按内容识别，全部校验通过后原子替换" icon={<Database />} /><p className="text-[9px] leading-4 text-[var(--muted)]">文件分组、记录集合路径、文本字段和筛选参数可在 API 配置中心调整。</p></>}{handler === phpHandlerId && <><FileUploadField key={`php-${mediaInputKey}`} name="assets" required accept=".zip,.php,application/zip,application/x-zip-compressed,application/x-httpd-php,text/x-php,text/plain" title="替换 PHP 程序包或单个 PHP 文件" description="支持 ZIP，也支持直接上传 index.php；新文件校验通过后原子替换" icon={<FileCode2 />} /><Field label="入口文件" optional><input name="entryFile" value={entryFile} onChange={(event) => setEntryFile(event.target.value)} className={inputClass} placeholder="留空自动发现" /></Field><p className="text-[9px] leading-4 text-[var(--muted)]">当前入口会自动回填；ZIP 目录变化时可留空重新发现入口。</p></>}{message && <p role="status" className="animate-[ui-fade-in_160ms_ease-out] rounded-[8px] bg-[var(--aqua-soft)] px-3 py-2 text-[10px] text-[var(--aqua)]">{message}</p>}{error && <p role="alert" className="animate-[ui-shake_220ms_ease-out] rounded-[8px] bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]">{error}</p>}<button disabled={saving} className="inline-flex h-10 items-center gap-2 rounded-[8px] bg-[var(--brand)] px-4 text-[10px] font-semibold text-white disabled:opacity-60 lg:h-9">{saving ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}{handler === phpHandlerId ? "部署新程序包" : handler === "content.static-json" ? "更新 JSON" : handler === "content.dataset" ? "替换数据源" : saving && ["content.random-image", "content.random-video"].includes(handler ?? "") ? "正在上传" : "添加内容"}</button></form>{total > (assets?.length ?? 0) && <div className="border-b border-[var(--line)] px-5 py-2 text-[9px] text-[var(--muted)]">当前显示最近 {assets?.length ?? 0} 项，共 {total} 项</div>}<div className="max-h-80 overflow-y-auto divide-y divide-[var(--line)]">{assets?.map((asset) => <div key={asset.id} className="animate-[ui-fade-in_160ms_ease-out] flex items-center gap-3 px-5 py-3"><span className="grid size-8 shrink-0 place-items-center rounded-[8px] bg-[var(--surface-subtle)]">{asset.kind === "IMAGE" ? <FileImage className="size-4" /> : asset.kind === "VIDEO" ? <FileVideo className="size-4" /> : asset.kind === "JSON" ? <Braces className="size-4" /> : asset.kind === "DATASET" ? <Database className="size-4" /> : asset.kind === "PHP_SOURCE" ? <FileCode2 className="size-4" /> : <Type className="size-4" />}</span><div className="min-w-0 flex-1"><strong className="block truncate text-[10px]">{asset.preview || asset.name}</strong><span className="mt-0.5 block text-[8px] text-[var(--muted)]">{formatBytes(asset.size)} · {new Date(asset.createdAt).toLocaleString("zh-CN")}</span></div>{handler !== phpHandlerId && <button onClick={() => { setDeleteTarget(asset); setDeleteError(""); }} className="grid size-10 place-items-center rounded-[7px] text-[var(--muted)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] lg:size-8" aria-label={`删除 ${asset.name}`}><Trash2 className="size-3.5" /></button>}</div>)}{assets?.length === 0 && <div className="py-12 text-center text-[10px] text-[var(--muted)]">当前没有可返回的内容</div>}{assets === null && !error && <div className="grid place-items-center py-12"><Loader2 className="size-5 animate-spin text-[var(--brand)]" /></div>}</div></div>{deleteTarget && <ConfirmDialog open title="删除返回内容？" description={deleteTarget.preview || deleteTarget.name} detail="删除后该内容不会再被接口返回，操作不可撤销。" busy={deleting} error={deleteError} onOpenChange={(open) => { if (!open) { setDeleteTarget(null); setDeleteError(""); } }} onConfirm={remove} />}</div>;
 }
 
 function AssetPicker({ name, accept, multiple = false, required = false, title, description, icon }: { name: string; accept: string; multiple?: boolean; required?: boolean; title: string; description: string; icon: React.ReactNode }) {

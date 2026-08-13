@@ -7,6 +7,7 @@ import { parseAllDocuments } from "yaml";
 import type { ApiDataType, ApiRequestParameter, ApiResponseParameter } from "@/lib/api-contracts";
 import type { ContentHandlerId } from "@/lib/internal-handlers";
 import { normalizePackagePath, resolvePhpEntryFile } from "@/lib/php-package";
+import { detectImageSignature } from "@/lib/image-signature";
 import { prisma } from "@/lib/server/prisma";
 import { storedMediaResponse } from "@/lib/server/media-storage";
 
@@ -39,6 +40,13 @@ function ownedArray(value: Uint8Array): Uint8Array<ArrayBuffer> {
 export async function preparePhpPackage(file: File | undefined, entryFile: string) {
   if (!file || file.size <= 0) throw new Error("PHP_PACKAGE_REQUIRED");
   if (file.size > MAX_PHP_PACKAGE_BYTES) throw new Error("PHP_PACKAGE_TOO_LARGE");
+  if (file.name.toLowerCase().endsWith(".php")) {
+    const path = normalizePackagePath(file.name);
+    const data = ownedBytes(await file.arrayBuffer());
+    if (data.byteLength > MAX_IMAGE_BYTES) throw new Error("PACKAGE_FILE_TOO_LARGE");
+    const asset = { kind: "PHP_SOURCE" as const, name: path, groupKey: "", mimeType: "application/x-httpd-php", data, size: data.byteLength };
+    return { entryFile: resolvePhpEntryFile([asset.name], entryFile), assets: [asset] };
+  }
   let unpacked: Record<string, Uint8Array>;
   let expandedFiles = 0;
   let expandedBytes = 0;
@@ -73,14 +81,6 @@ export async function preparePhpPackage(file: File | undefined, entryFile: strin
   const entry = resolvePhpEntryFile(prepared.map((item) => item.name), entryFile);
   if (prepared.reduce((sum, item) => sum + item.size, 0) > MAX_PHP_EXTRACTED_BYTES) throw new Error("PHP_EXTRACTED_TOO_LARGE");
   return { entryFile: entry, assets: prepared };
-}
-
-function detectedImageType(bytes: Uint8Array) {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return "image/png";
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
-  if (bytes.length >= 12 && new TextDecoder().decode(bytes.slice(0, 4)) === "RIFF" && new TextDecoder().decode(bytes.slice(8, 12)) === "WEBP") return "image/webp";
-  if (bytes.length >= 6 && ["GIF87a", "GIF89a"].includes(new TextDecoder().decode(bytes.slice(0, 6)))) return "image/gif";
-  return null;
 }
 
 function textAssets(value: string, source: string) {
@@ -298,7 +298,7 @@ export async function prepareApiAssets(handler: ContentHandlerId, input: { files
     for (const file of input.files) {
       if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) throw new Error("INVALID_IMAGE_SIZE");
       const data = ownedBytes(await file.arrayBuffer());
-      const mimeType = detectedImageType(data);
+      const mimeType = detectImageSignature(data)?.mimeType;
       if (!mimeType) throw new Error("UNSUPPORTED_IMAGE");
       prepared.push({ kind: "IMAGE", name: file.name.slice(0, 180) || "image", groupKey: "", mimeType, data, size: data.byteLength });
     }

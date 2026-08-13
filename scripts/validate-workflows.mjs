@@ -19,6 +19,7 @@ assert(workflow?.jobs?.deploy?.concurrency == null, "Concurrency must be defined
 assert(Array.isArray(workflow?.jobs?.deploy?.steps), "Production deployment steps are missing");
 assert(Array.isArray(ciWorkflow?.jobs?.quality?.steps), "CI quality steps are missing");
 const qualityCommands = ciWorkflow.jobs.quality.steps.map((step) => step.run).filter(Boolean);
+assert(qualityCommands.includes("npm run test:image-signature"), "CI must test tolerant image signature detection");
 assert(qualityCommands.includes("npm run test:php-package"), "CI must test PHP package entry discovery");
 assert(qualityCommands.includes("npm run test:upstream"), "CI must test external upstream URL handling");
 const containerNames = ciWorkflow?.jobs?.container?.strategy?.matrix?.include?.map((item) => item.name) ?? [];

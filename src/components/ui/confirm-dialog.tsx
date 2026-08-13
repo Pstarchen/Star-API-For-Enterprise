@@ -30,7 +30,7 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return <Dialog open={open} onOpenChange={(nextOpen) => { if (!busy) onOpenChange(nextOpen); }}>
-    <DialogContent className="max-w-[460px] p-0" showClose={!busy}>
+    <DialogContent className="max-w-[460px] p-0" showClose={!busy} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
       <DialogHeader>
         <div className="flex items-start gap-3 pr-5">
           <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[var(--danger-soft)] text-[var(--danger)]"><AlertTriangle className="size-4" /></span>

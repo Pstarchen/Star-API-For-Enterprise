@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
 import { basename, extname, resolve, sep } from "node:path";
@@ -44,7 +45,7 @@ function safeFileName(value: string) {
 async function fileHeader(path: string) {
   const handle = await open(path, "r");
   try {
-    const buffer = Buffer.alloc(32);
+    const buffer = Buffer.alloc(96);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
     return buffer.subarray(0, bytesRead);
   } finally {
@@ -80,6 +81,7 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
   const temporaryPath = resolve(temporaryDirectory, `${id}.upload`);
   const file = await open(temporaryPath, "wx", 0o600);
   let size = BigInt(0);
+  const hash = createHash("sha256");
   try {
     const reader = input.body.getReader();
     while (true) {
@@ -90,6 +92,7 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
         await reader.cancel();
         throw new Error("MEDIA_API_LIMIT");
       }
+      hash.update(chunk.value);
       await file.write(chunk.value);
     }
   } catch (error) {
@@ -109,7 +112,7 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
     const storageKey = `${input.productId}/${id}${storageExtension}`;
     const finalPath = storedPath(storageKey);
     await rename(temporaryPath, finalPath);
-    return { storageKey, name, mimeType, size, kind: input.kind } satisfies StoredMedia;
+    return { storageKey, name, mimeType, size, kind: input.kind, checksum: hash.digest("hex") } satisfies StoredMedia & { checksum: string };
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
     throw error;

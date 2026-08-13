@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm run build",
     "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:image-signature": "node --experimental-strip-types scripts/test-image-signature.mjs",
     "test:php-package": "node --experimental-strip-types scripts/test-php-package.mjs",
     "test:upstream": "node --experimental-strip-types scripts/test-upstream.mjs",
     "test:epay": "node --experimental-strip-types scripts/test-epay.mjs",

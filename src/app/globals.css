@@ -1193,6 +1193,12 @@ html[data-theme="dark"] .auth-stage { background: linear-gradient(rgb(14 17 26 /
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
+@keyframes ui-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
 .mono {
   font-family: var(--font-mono);
 }

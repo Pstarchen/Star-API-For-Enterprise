@@ -96,7 +96,7 @@ try {
 
     $disabled = implode(',', ['exec','shell_exec','system','passthru','proc_open','popen','pcntl_exec','putenv','mail','dl','link','symlink']);
     $phpCgi = getenv('PHP_CGI_BINARY') ?: 'php-cgi83';
-    $command = [$phpCgi, '-d', 'open_basedir=' . $directory, '-d', 'allow_url_fopen=0', '-d', 'allow_url_include=0', '-d', 'disable_functions=' . $disabled, '-d', 'memory_limit=128M', '-d', 'max_execution_time=10', '-d', 'display_errors=0', '-d', 'log_errors=0', '-d', 'expose_php=0'];
+    $command = [$phpCgi, '-d', 'open_basedir=' . $directory . ':/tmp', '-d', 'allow_url_fopen=1', '-d', 'allow_url_include=0', '-d', 'default_socket_timeout=8', '-d', 'disable_functions=' . $disabled, '-d', 'memory_limit=128M', '-d', 'max_execution_time=10', '-d', 'display_errors=0', '-d', 'log_errors=0', '-d', 'expose_php=0'];
     $pipes = [];
     $process = proc_open($command, [['pipe', 'r'], ['pipe', 'w'], ['pipe', 'w']], $pipes, $entryDirectory, $environment);
     if (!is_resource($process)) respond(500, ['message' => 'runtime unavailable']);

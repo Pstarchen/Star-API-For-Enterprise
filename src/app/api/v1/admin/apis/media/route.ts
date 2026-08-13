@@ -51,29 +51,37 @@ export async function POST(request: Request) {
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 媒体" }, { status: 403, headers: noStoreHeaders });
 
   const limits = mediaStorageLimits();
-  const [currentCount, currentSize] = await Promise.all([
-    prisma.apiAsset.count({ where: { productId, kind } }),
-    prisma.apiAsset.aggregate({ where: { productId, kind }, _sum: { size: true } }),
-  ]);
-  const usedBytes = currentSize._sum.size ?? BigInt(0);
-  if (currentCount >= limits.maxFiles) return Response.json({ code: 409, message: uploadError(new Error("MEDIA_FILE_LIMIT")) }, { status: 409, headers: noStoreHeaders });
-  if (usedBytes + contentLength > limits.maxApiBytes) return Response.json({ code: 409, message: uploadError(new Error("MEDIA_API_LIMIT")) }, { status: 409, headers: noStoreHeaders });
+  if (contentLength > limits.maxApiBytes) return Response.json({ code: 409, message: uploadError(new Error("MEDIA_API_LIMIT")) }, { status: 409, headers: noStoreHeaders });
 
   let stored: Awaited<ReturnType<typeof storeMediaRequest>> | null = null;
   try {
-    stored = await storeMediaRequest({ productId, encodedName, body: request.body, kind, maximumBytes: limits.maxApiBytes - usedBytes });
+    stored = await storeMediaRequest({ productId, encodedName, body: request.body, kind, maximumBytes: limits.maxApiBytes });
+    const duplicate = await prisma.apiAsset.findFirst({
+      where: { productId, kind, groupKey: stored.checksum },
+      select: { id: true, kind: true, name: true, mimeType: true, size: true, storageKey: true, createdAt: true },
+    });
+    if (duplicate) {
+      await removeStoredMedia(stored.storageKey).catch(() => undefined);
+      return Response.json({ code: 200, message: `${kind === "VIDEO" ? "视频" : "图片"}“${stored.name}”已存在，已跳过重复上传`, data: { id: duplicate.id, kind: duplicate.kind, name: duplicate.name, mimeType: duplicate.mimeType, size: Number(duplicate.size), createdAt: duplicate.createdAt.toISOString(), preview: null, duplicate: true } }, { headers: noStoreHeaders });
+    }
     const asset = await prisma.$transaction(async (transaction) => {
       if (!(await lockApiProduct(transaction, productId))) throw new Error("API_NOT_FOUND");
+      const duplicate = await transaction.apiAsset.findFirst({ where: { productId, kind, groupKey: stored!.checksum }, select: { id: true, kind: true, name: true, mimeType: true, size: true, storageKey: true, createdAt: true } });
+      if (duplicate) return duplicate;
       const [count, size] = await Promise.all([
         transaction.apiAsset.count({ where: { productId, kind } }),
         transaction.apiAsset.aggregate({ where: { productId, kind }, _sum: { size: true } }),
       ]);
       if (count >= limits.maxFiles) throw new Error("MEDIA_FILE_LIMIT");
       if ((size._sum.size ?? BigInt(0)) + stored!.size > limits.maxApiBytes) throw new Error("MEDIA_API_LIMIT");
-      const created = await transaction.apiAsset.create({ data: { productId, kind, name: stored!.name, mimeType: stored!.mimeType, data: Buffer.alloc(0), storageKey: stored!.storageKey, size: stored!.size } });
+      const created = await transaction.apiAsset.create({ data: { productId, kind, name: stored!.name, groupKey: stored!.checksum, mimeType: stored!.mimeType, data: Buffer.alloc(0), storageKey: stored!.storageKey, size: stored!.size } });
       await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: `api.${kind.toLowerCase()}.add`, resource: "api-product", resourceId: productId, metadata: { assetId: created.id, name: created.name, bytes: Number(created.size) }, ipAddress: requestIp(request) } });
       return created;
     });
+    if (asset.storageKey !== stored.storageKey) {
+      await removeStoredMedia(stored.storageKey).catch(() => undefined);
+      return Response.json({ code: 200, message: `${kind === "VIDEO" ? "视频" : "图片"}“${stored.name}”已存在，已跳过重复上传`, data: { id: asset.id, kind: asset.kind, name: asset.name, mimeType: asset.mimeType, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), preview: null, duplicate: true } }, { headers: noStoreHeaders });
+    }
     revalidatePath("/", "layout");
     return Response.json({ code: 201, message: `${kind === "VIDEO" ? "视频" : "图片"}“${asset.name}”已上传`, data: { id: asset.id, kind: asset.kind, name: asset.name, mimeType: asset.mimeType, size: Number(asset.size), createdAt: asset.createdAt.toISOString(), preview: null } }, { status: 201, headers: noStoreHeaders });
   } catch (error) {

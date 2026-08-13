@@ -19,4 +19,6 @@ const unpacked = unzipSync(archive);
 assert.equal(resolvePhpEntryFile(Object.keys(unpacked), ""), "hitokoto/index.php");
 assert.deepEqual(Object.keys(unpacked).sort(), ["hitokoto/data/a.json", "hitokoto/index.php"]);
 
+assert.equal(resolvePhpEntryFile(["index.php"], ""), "index.php");
+
 console.log("PASS PHP package entry discovery");
