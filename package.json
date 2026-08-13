@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -19,6 +19,12 @@
     "test:stress": "node scripts/stress-e2e.mjs",
     "install:token": "node scripts/show-install-token-docker.mjs",
     "install:token:host": "node --env-file=.env.production.local scripts/show-install-token.mjs",
+    "production:install": "bash scripts/production.sh install",
+    "production:check": "bash scripts/production.sh check",
+    "production:update": "bash scripts/production.sh update",
+    "production:token": "bash scripts/production.sh token",
+    "production:status": "bash scripts/production.sh status",
+    "production:logs": "bash scripts/production.sh logs",
     "deploy:baota:init": "bash deploy/baota/init-environment.sh",
     "deploy:baota:build": "bash deploy/baota/build.sh",
     "db:generate": "prisma generate",

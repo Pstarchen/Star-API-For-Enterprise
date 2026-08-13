@@ -25,22 +25,26 @@ export function ApiCategoryManager({ categories, close, changed }: { categories:
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const formElement = event.currentTarget;
     setSaving(true);
     setError("");
     setNotice("");
-    const form = new FormData(event.currentTarget);
+    const form = new FormData(formElement);
     const payload = { ...(editing ? { id: editing.id } : {}), name: String(form.get("name") ?? ""), description: String(form.get("description") ?? ""), sortOrder: Number(form.get("sortOrder") ?? 0), enabled: form.get("enabled") === "on" };
+    let result: { message?: string; data?: ApiCategoryOption | ApiCategoryOption[] };
     try {
       const response = await fetch("/api/v1/admin/api-categories", { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      const result = await response.json();
+      result = await response.json();
       if (!response.ok) { setError(result.message ?? "分类保存失败"); return; }
-      const next = editing ? result.data as ApiCategoryOption[] : [...items, result.data as ApiCategoryOption].sort(categorySort);
-      apply(next);
-      setEditing(null);
-      setNotice(editing ? "分类已更新" : "分类已创建");
-      event.currentTarget.reset();
-    } catch { setError("无法连接分类管理服务"); }
-    finally { setSaving(false); }
+    } catch { setError("无法连接分类管理服务"); return; }
+    finally {
+      setSaving(false);
+    }
+    const next = editing ? result.data as ApiCategoryOption[] : [...items, result.data as ApiCategoryOption].sort(categorySort);
+    apply(next);
+    setEditing(null);
+    setNotice(result.message ?? (editing ? "分类已更新" : "分类已创建"));
+    formElement.reset();
   }
 
   async function remove() {

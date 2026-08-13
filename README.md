@@ -44,7 +44,16 @@ docker compose --env-file .env.production -f compose.production.yml pull
 docker compose --env-file .env.production -f compose.production.yml up -d
 ```
 
-只需修改 `.env.production` 中的 `STAR_API_VERSION` 即可同步升级应用、迁移器和 PHP Runner。已部署服务器也可运行 `bash scripts/update-production.sh --check` 检查版本，再执行 `bash scripts/update-production.sh` 自动备份、升级和健康验证。GHCR 发布、Nginx/Caddy 反代、备份和回滚步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
+也可以使用便捷脚本完成常见安装和更新动作：
+
+```bash
+npm run production:install
+npm run production:check
+npm run production:update
+npm run production:token
+```
+
+`production:install` 会在缺少 `.env.production` 时从示例文件创建一份配置，然后拉取镜像并启动服务；正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。升级时只需修改 `.env.production` 中的 `STAR_API_VERSION`，或运行 `npm run production:update -- 0.1.11` 指定版本，即可同步升级应用、迁移器和 PHP Runner。已部署服务器也可运行 `npm run production:check` 检查版本，再执行 `npm run production:update` 自动备份、升级和健康验证。GHCR 发布、Nginx/Caddy 反代、备份和回滚步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
 
 需要启用数据库时：
 
