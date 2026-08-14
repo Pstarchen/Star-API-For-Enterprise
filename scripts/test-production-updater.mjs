@@ -134,7 +134,7 @@ assert.match(updateResult.stdout, /Update completed: 0\.1\.5 -> 0\.1\.6/);
 assert.equal(readFileSync(join(project, ".env.production"), "utf8").match(/^STAR_API_VERSION=(.+)$/m)?.[1], "0.1.6");
 const updateCommands = readFileSync(log, "utf8");
 assert.equal((updateCommands.match(/^timeout 1800 docker pull /gm) ?? []).length, 3);
-assert.equal((updateCommands.match(/^image inspect /gm) ?? []).length, 3);
+assert.equal((updateCommands.match(/^image inspect /gm) ?? []).length, 6);
 
 writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\n");
 writeFileSync(log, "");
