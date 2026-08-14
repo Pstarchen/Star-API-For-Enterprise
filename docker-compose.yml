@@ -145,7 +145,6 @@ services:
     networks:
       execution:
       php-egress:
-        gw_priority: 1
 
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}

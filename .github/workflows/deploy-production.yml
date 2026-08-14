@@ -99,7 +99,7 @@ jobs:
         run: |
           set -euo pipefail
           install -d -m 700 "$RUNNER_TEMP/star-api-deploy"
-          git show "v${DEPLOY_VERSION}:compose.production.yml" > "$RUNNER_TEMP/star-api-deploy/compose.production.yml"
+          install -m 600 compose.production.yml "$RUNNER_TEMP/star-api-deploy/compose.production.yml"
           install -m 700 scripts/update-production.sh "$RUNNER_TEMP/star-api-deploy/update-production.sh"
           install -m 700 scripts/production.sh "$RUNNER_TEMP/star-api-deploy/production.sh"
           tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh production.sh
