@@ -683,6 +683,14 @@ components:
   expectStatus(response.status, 200, "documentation uses public gateway URL", docsHtml);
   assert.ok(docsHtml.includes(`${portalUrl}/api/`), "documentation must use the platform domain and /api prefix for default routes");
   assert.ok(!docsHtml.includes("/api/v1/gateway/"), "documentation must not add a legacy API prefix");
+  result = await jsonRequest("/api/v1/catalog");
+  expectStatus(result.response.status, 200, "read published catalog for documentation", result.body);
+  assert.ok(result.body.data.length > 1, "documentation test requires multiple published endpoints");
+  for (const product of result.body.data) {
+    assert.ok(docsHtml.includes(product.name), `documentation must include published endpoint name ${product.name}`);
+    assert.ok(docsHtml.includes(`${portalUrl}${product.endpoint}`), `documentation must include published endpoint URL ${product.endpoint}`);
+  }
+  assert.ok((docsHtml.match(/curl --request/g) ?? []).length >= result.body.data.length, "documentation must include a curl command for every published endpoint");
 
   response = await request(`/apis/${staticSlug}`);
   const detailHtml = await response.text();

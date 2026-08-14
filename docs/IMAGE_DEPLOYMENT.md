@@ -113,7 +113,7 @@ sudo star-api enable-updates
 指定版本升级：
 
 ```bash
-sudo star-api update 0.1.16
+sudo star-api update 0.1.17
 ```
 
 更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`，本机任务状态保存在 `STAR_API_UPDATE_STATE_DIR`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。`STAR_API_UPDATE_REGION=cn` 优先使用 `STAR_API_IMAGE_PROXIES` 中的国内镜像并按官方平台摘要校验，失败后回退 GHCR；`global` 优先 GHCR，失败后回退代理；`auto` 根据服务器时区选择。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
@@ -127,7 +127,7 @@ STAR_API_PHP_RUNNER_IMAGE=registry.example.com/star-api/php-runner
 STAR_API_UPDATE_FEED_URL=https://updates.example.com/star-api/stable.json
 ```
 
-版本源响应为 `{"latestVersion":"0.1.16"}`。私有仓库凭据使用宿主机 `docker login` 管理，不写入平台数据库。指定版本更新可直接运行 `sudo star-api update 0.1.16`，不需要访问 GitHub API。
+版本源响应为 `{"latestVersion":"0.1.17"}`。私有仓库凭据使用宿主机 `docker login` 管理，不写入平台数据库。指定版本更新可直接运行 `sudo star-api update 0.1.17`，不需要访问 GitHub API。
 
 迁移执行后不会自动切回旧镜像，因为旧应用不一定兼容新数据库。失败时脚本会保留目标版本、输出日志命令和备份路径，由管理员根据发布说明决定修复当前版本或完整恢复数据库、媒体与密钥备份。
 

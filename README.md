@@ -54,7 +54,7 @@ npm run production:token
 sudo star-api doctor
 ```
 
-`production:install` 会在缺少 `.env.production` 时创建配置、拉取镜像并启动服务；在 root + systemd 环境还会自动启用宿主机本地更新服务，并安装与当前目录无关的 `/usr/local/bin/star-api` 管理命令。正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。之后可在任意目录运行 `sudo star-api check`、`sudo star-api update`、`sudo star-api update 0.1.16` 或 `sudo star-api doctor`；更新器会自动备份、迁移并验证健康状态。镜像部署、反代、备份和恢复步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
+`production:install` 会在缺少 `.env.production` 时创建配置、拉取镜像并启动服务；在 root + systemd 环境还会自动启用宿主机本地更新服务，并安装与当前目录无关的 `/usr/local/bin/star-api` 管理命令。正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。之后可在任意目录运行 `sudo star-api check`、`sudo star-api update`、`sudo star-api update 0.1.17` 或 `sudo star-api doctor`；更新器会自动备份、迁移并验证健康状态。镜像部署、反代、备份和恢复步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
 
 管理员后台“平台设置”底部的“系统安装与更新”可以直接排队本机更新，不需要 GitHub Token，也不会把 Docker Socket 挂给网站容器。生产部署会自动启用 systemd 监听器；如需人工恢复，可在任意目录运行 `sudo star-api enable-updates`。`STAR_API_UPDATE_REGION=cn` 会优先使用国内摘要校验镜像，`global` 会优先使用官方 GHCR，`auto` 根据服务器时区选择。完全脱离 GitHub 时，将三个 `STAR_API_*_IMAGE` 指向独立镜像仓库，并配置返回 `{"latestVersion":"X.Y.Z"}` 的 `STAR_API_UPDATE_FEED_URL`。
 
