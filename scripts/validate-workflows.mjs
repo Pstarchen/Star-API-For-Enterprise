@@ -43,6 +43,8 @@ assert(deployScript.includes('docker tag "$proxy_ref" "$image"'), "Production de
 assert(!deployScript.includes('docker save "${release_images[@]}"'), "Production deploy must not stream large image archives over SSH");
 assert(deployScript.includes('process-local-update.sh'), "Production deploy must install the host-local update worker");
 assert(deployScript.includes('bash "$payload_dir/production.sh" enable-updates'), "Production deploy must enable host-local updates");
+assert(deployScript.includes('bash "$payload_dir/update-production.sh" --check "$version" </dev/null'), "Production preflight must not consume the remote script stream");
+assert(deployScript.includes('bash "$payload_dir/update-production.sh" "$version" </dev/null'), "Production update must not consume the remote script stream");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {

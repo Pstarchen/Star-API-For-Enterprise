@@ -243,11 +243,11 @@ jobs:
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
           STAR_API_BACKUP_KEEP=1 \
-            bash "$payload_dir/update-production.sh" --check "$version"
+            bash "$payload_dir/update-production.sh" --check "$version" </dev/null
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
           STAR_API_BACKUP_KEEP=1 \
-            bash "$payload_dir/update-production.sh" "$version"
+            bash "$payload_dir/update-production.sh" "$version" </dev/null
           install -d -m 755 "$deploy_path/scripts"
           install -m 700 "$payload_dir/update-production.sh" "$deploy_path/scripts/update-production.sh"
           install -m 700 "$payload_dir/production.sh" "$deploy_path/scripts/production.sh"
