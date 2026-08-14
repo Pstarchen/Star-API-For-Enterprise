@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomInt } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { parse as parseDelimited } from "csv-parse/sync";
 import { unzipSync } from "fflate";
 import { parseAllDocuments } from "yaml";
@@ -35,6 +35,29 @@ function ownedArray(value: Uint8Array): Uint8Array<ArrayBuffer> {
   const data = new Uint8Array(new ArrayBuffer(value.byteLength));
   data.set(value);
   return data;
+}
+
+function trustedImageMimeType(file: File, data: Uint8Array) {
+  const detected = detectImageSignature(data)?.mimeType;
+  if (detected) return detected;
+  const extension = file.name.toLowerCase().match(/\.[^.]+$/)?.[0] ?? "";
+  const byExtension: Record<string, string> = {
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".ico": "image/x-icon",
+    ".jfif": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+  };
+  const declared = file.type.trim().toLowerCase().split(";", 1)[0];
+  return byExtension[extension] ?? (Object.values(byExtension).includes(declared) ? declared : "application/octet-stream");
 }
 
 export async function preparePhpPackage(file: File | undefined, entryFile: string) {
@@ -295,12 +318,14 @@ export async function prepareApiAssets(handler: ContentHandlerId, input: { files
   const prepared: PreparedAsset[] = [];
 
   if (handler === "content.random-image") {
+    const checksums = new Set<string>();
     for (const file of input.files) {
       if (file.size <= 0 || file.size > MAX_IMAGE_BYTES) throw new Error("INVALID_IMAGE_SIZE");
       const data = ownedBytes(await file.arrayBuffer());
-      const mimeType = detectImageSignature(data)?.mimeType;
-      if (!mimeType) throw new Error("UNSUPPORTED_IMAGE");
-      prepared.push({ kind: "IMAGE", name: file.name.slice(0, 180) || "image", groupKey: "", mimeType, data, size: data.byteLength });
+      const checksum = createHash("sha256").update(data).digest("hex");
+      if (checksums.has(checksum)) continue;
+      checksums.add(checksum);
+      prepared.push({ kind: "IMAGE", name: file.name.slice(0, 180) || "image", groupKey: checksum, mimeType: trustedImageMimeType(file, data), data, size: data.byteLength });
     }
   }
 
@@ -339,7 +364,6 @@ export function assetErrorMessage(error: unknown) {
   const messages: Record<string, string> = {
     TOO_MANY_ASSETS: `单次最多上传 ${MAX_ASSET_FILES} 个文件`,
     INVALID_IMAGE_SIZE: `每张图片必须小于 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`,
-    UNSUPPORTED_IMAGE: "仅支持真实的 PNG、JPEG、WebP 或 GIF 图片",
     INVALID_TEXT_SIZE: `每个文本文件必须小于 ${MAX_TEXT_FILE_BYTES / 1024 / 1024} MB`,
     INVALID_JSON_SIZE: `JSON 文件必须小于 ${MAX_TEXT_FILE_BYTES / 1024 / 1024} MB`,
     INVALID_JSON: "JSON 内容格式不正确",

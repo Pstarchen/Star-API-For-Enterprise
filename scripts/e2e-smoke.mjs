@@ -114,7 +114,7 @@ async function uploadMedia(cookie, productId, name, bytes, type, expectedStatus 
     body: new Blob([bytes], { type }),
   }, cookie);
   const body = await response.json().catch(() => null);
-  expectStatus(response.status, expectedStatus, `${expectedStatus === 201 ? "upload" : "reject"} media ${name}`, body);
+  expectStatus(response.status, expectedStatus, `${expectedStatus >= 400 ? "reject" : "upload"} media ${name}`, body);
   return body;
 }
 
@@ -289,6 +289,7 @@ async function main() {
   assert.equal(result.body.data.available, true);
 
   const staticApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Static JSON Smoke", slug: staticSlug, content: JSON.stringify({ ok: true, source: "static-json" }), billingMode: "PER_REQUEST", unitPrice: 0.25, dailyLimit: 1 });
+  const paidDirectApi = await createApi(adminCookie, { sourceType: "STATIC_JSON", name: "Paid Direct Link Smoke", slug: `paid-direct-${runId}`, content: JSON.stringify({ ok: true, source: "paid-direct-link" }), billingMode: "PER_REQUEST", unitPrice: 0.4, dailyLimit: 0 });
   const textApi = await createApi(adminCookie, { sourceType: "RANDOM_TEXT", name: "Random Text Smoke", slug: `text-${runId}`, content: "alpha\nbeta" });
   const datasetApi = await createApi(adminCookie, {
     sourceType: "DATASET",
@@ -569,12 +570,40 @@ components:
   openApiImport = await importOpenApi(adminCookie, { name: "Conflicting OpenAPI Service", slug: `conflict-${openApiSlug}`, publicPrefix: `/api/${openApiSlug}` }, openApiDocument, 409);
   assert.match(openApiImport.message, /冲突/);
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2nZcAAAAASUVORK5CYII=", "base64");
-  const imageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Random Image Smoke", slug: `image-${runId}` }, [{ name: "pixel.png", blob: new Blob([png], { type: "image/png" }) }]);
-  await uploadMedia(adminCookie, imageApi.id, "pixel-streamed.png", png, "image/png");
+  const administratorApprovedImage = Buffer.from("administrator-approved-image-content");
+  const imageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Random Image Smoke", slug: `image-${runId}` }, [
+    { name: "pixel.png", blob: new Blob([png], { type: "image/png" }) },
+    { name: "administrator-approved.jpg", blob: new Blob([administratorApprovedImage], { type: "image/jpeg" }) },
+    { name: "same-approved-content.data", blob: new Blob([administratorApprovedImage], { type: "application/octet-stream" }) },
+  ]);
+  assert.equal(imageApi.assetCount, 2, "initial media import must accept administrator-approved content and remove content duplicates");
+  const duplicateInitialImage = await uploadMedia(adminCookie, imageApi.id, "pixel-streamed.png", png, "image/png", 200);
+  assert.equal(duplicateInitialImage.data.duplicate, true, "streamed media must deduplicate content imported during API creation");
   const videoApi = await createApi(adminCookie, { sourceType: "RANDOM_VIDEO", name: "Random Video Smoke", slug: `video-${runId}` });
   const tinyMp4 = Buffer.from([0, 0, 0, 24, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0, 0, 0, 0, 0x69, 0x73, 0x6f, 0x6d, 0x6d, 0x70, 0x34, 0x32]);
   await uploadMedia(adminCookie, videoApi.id, "tiny.mp4", tinyMp4, "video/mp4");
-  await uploadMedia(adminCookie, videoApi.id, "disguised.mp4", Buffer.from("<?php echo 'unsafe';"), "video/mp4", 400);
+  const administratorMediaApi = await createApi(adminCookie, { sourceType: "RANDOM_VIDEO", name: "Trusted Media Smoke", slug: `trusted-media-${runId}` });
+  const administratorApprovedVideo = Buffer.from("administrator-approved-content");
+  await uploadMedia(adminCookie, administratorMediaApi.id, "administrator-approved.mp4", administratorApprovedVideo, "video/mp4");
+  const duplicateVideo = await uploadMedia(adminCookie, administratorMediaApi.id, "same-content-any-name.bin", administratorApprovedVideo, "application/octet-stream", 200);
+  assert.equal(duplicateVideo.data.duplicate, true, "server-side checksums must deduplicate media regardless of filename");
+  const cleanupImageApi = await createApi(adminCookie, { sourceType: "RANDOM_IMAGE", name: "Batch Content Smoke", slug: `image-batch-${runId}` });
+  const approvedA = Buffer.from("administrator-approved-image-a");
+  const approvedB = Buffer.from("administrator-approved-image-b");
+  const mediaArchive = zipSync({ "nested/approved-a.jpg": approvedA, "nested/approved-a-copy.data": approvedA, "approved-b.custom": approvedB });
+  const archiveUpload = await uploadMedia(adminCookie, cleanupImageApi.id, "approved-media.zip", mediaArchive, "application/zip");
+  assert.equal(archiveUpload.data.uploaded, 2, "ZIP media import must persist every unique administrator-approved entry");
+  assert.equal(archiveUpload.data.duplicates, 1, "ZIP media import must deduplicate matching entries");
+  assert.equal(archiveUpload.data.skipped.length, 0, "valid ZIP entries must not be content-filtered");
+  result = await jsonRequest(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(cleanupImageApi.id)}`, {}, adminCookie);
+  expectStatus(result.response.status, 200, "list ZIP-imported media", result.body);
+  assert.equal(result.body.meta.total, 2);
+  result = await jsonRequest(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(cleanupImageApi.id)}`, { method: "DELETE", body: { ids: [result.body.data[0].id] } }, adminCookie);
+  expectStatus(result.response.status, 200, "batch delete selected media", result.body);
+  assert.equal(result.body.data.deleted, 1);
+  result = await jsonRequest(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(cleanupImageApi.id)}&all=true`, { method: "DELETE" }, adminCookie);
+  expectStatus(result.response.status, 200, "clear all API media", result.body);
+  assert.equal(result.body.data.deleted, 1);
   const cleanupVideoApi = await createApi(adminCookie, { sourceType: "RANDOM_VIDEO", name: "Disposable Video Smoke", slug: `video-delete-${runId}` });
   await uploadMedia(adminCookie, cleanupVideoApi.id, "delete-me.mp4", tinyMp4, "video/mp4");
   response = await request(`/api/v1/admin/apis?id=${encodeURIComponent(cleanupVideoApi.id)}`, { method: "DELETE" }, adminCookie);
@@ -651,7 +680,7 @@ components:
   response = await request("/api/v1/admin/apis", { method: "POST", body: privateForm }, adminCookie);
   expectStatus(response.status, 400, "block private external upstream on creation", await response.text());
 
-  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) {
+  for (const product of [staticApi, paidDirectApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) {
     assert.equal(product.publicHost, new URL(portalUrl).hostname, `${product.slug} must use the platform host`);
     assert.match(product.endpoint, /^\/api\//, `${product.slug} must use the /api prefix`);
   }
@@ -667,7 +696,7 @@ components:
   assert.equal(result.body.data.route.publicPath, staticApi.endpoint);
   result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { ...platformSettings, publicUrl: portalUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "restoring public URL migrates API routes", result.body);
-  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
+  for (const product of [staticApi, paidDirectApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) await publishApi(adminCookie, product);
 
   result = await jsonRequest("/api/v1/apps", { method: "POST", body: { name: "Admin API Test App", environment: "TEST" } }, adminCookie);
   expectStatus(result.response.status, 201, "administrator creates test application and API key", result.body);
@@ -707,9 +736,14 @@ components:
   const appId = result.body.data.app.id;
   const apiKey = result.body.data.secret;
   assert.match(apiKey, /^sk_test_/);
+  result = await jsonRequest("/api/v1/apps");
+  expectStatus(result.response.status, 401, "anonymous application refresh rejected", result.body);
+  result = await jsonRequest("/api/v1/apps", {}, personalCookie);
+  expectStatus(result.response.status, 200, "authenticated application refresh", result.body);
+  assert.equal(result.body.data.find((app) => app.id === appId)?.calls, 0);
 
   let latestSubscriptionResult;
-  for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
+  for (const product of [staticApi, paidDirectApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
 
   const datasetSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === datasetApi.id);
   const datasetEndpoint = datasetSubscription?.endpoints.find((item) => item.methods.includes("GET") || item.methods.includes("ALL"));
@@ -773,6 +807,45 @@ components:
   result = await jsonRequest("/api/v1/admin/wallet", { method: "PATCH", body: { tenantId: personalTenantId, type: "ADMIN_RECHARGE", amount: "10.00", reason: "E2E paid API verification" } }, adminCookie);
   expectStatus(result.response.status, 200, "administrator funds paid API test account", result.body);
   assert.equal(result.body.data.balance, "10");
+
+  const paidDirectSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === paidDirectApi.id);
+  const paidDirectEndpoint = paidDirectSubscription?.endpoints.find((item) => item.methods.includes("GET") || item.methods.includes("ALL"));
+  assert.ok(paidDirectSubscription && paidDirectEndpoint, "paid API subscription must expose a GET direct-link endpoint");
+  result = await jsonRequest("/api/v1/apps", {}, personalCookie);
+  expectStatus(result.response.status, 200, "application usage before paid direct link", result.body);
+  const paidAppBefore = result.body.data.find((app) => app.id === appId);
+  assert.ok(paidAppBefore, "paid direct-link application must be visible");
+  result = await jsonRequest("/api/v1/wallet", {}, personalCookie);
+  expectStatus(result.response.status, 200, "wallet before paid direct link", result.body);
+  const directBalanceBefore = Number(result.body.data.balance);
+  result = await jsonRequest("/api/v1/direct-links", { method: "POST", body: { subscriptionId: paidDirectSubscription.id, endpointId: paidDirectEndpoint.id, name: "Paid direct link", defaultParameters: {}, expiresInDays: 7 } }, personalCookie);
+  expectStatus(result.response.status, 201, "create paid API direct link", result.body);
+  const paidDirectLinkId = result.body.data.directLinkId;
+  const paidDirectPath = result.body.data.path;
+  response = await request(paidDirectPath);
+  const paidDirectBody = await response.json();
+  expectStatus(response.status, 200, "paid direct link gateway call", paidDirectBody);
+  assert.deepEqual(paidDirectBody, { ok: true, source: "paid-direct-link" });
+  assert.equal(Number(response.headers.get("x-request-cost")), 0.4, "paid direct link must expose the charged amount");
+  assert.equal(response.headers.get("x-billable-units"), "1");
+  result = await jsonRequest("/api/v1/apps", {}, personalCookie);
+  expectStatus(result.response.status, 200, "application usage after paid direct link", result.body);
+  const paidAppAfter = result.body.data.find((app) => app.id === appId);
+  assert.equal(paidAppAfter.calls, paidAppBefore.calls + 1, "paid direct link must increment application calls");
+  assert.equal(Number(paidAppAfter.cost), Number(paidAppBefore.cost) + 0.4, "paid direct link must increment application cost exactly once");
+  result = await jsonRequest("/api/v1/wallet", {}, personalCookie);
+  expectStatus(result.response.status, 200, "wallet after paid direct link", result.body);
+  assert.equal(Number(result.body.data.balance), directBalanceBefore - 0.4, "paid direct link must debit the tenant balance exactly once");
+  const usageEntry = result.body.data.entries.find((entry) => entry.type === "API_USAGE" && Number(entry.delta) === -0.4);
+  assert.ok(usageEntry, "paid direct link must create an API_USAGE wallet ledger entry");
+  assert.equal(Number(usageEntry.balanceAfter), directBalanceBefore - 0.4);
+  result = await jsonRequest("/api/v1/admin/subscriptions", {}, adminCookie);
+  expectStatus(result.response.status, 200, "paid direct-link subscription usage", result.body);
+  const paidUsage = result.body.data.find((item) => item.id === paidDirectSubscription.id);
+  assert.equal(paidUsage.usageThisMonth, 1, "paid direct link must increment monthly subscription usage");
+  assert.equal(paidUsage.usageToday, 1, "paid direct link must increment daily subscription usage");
+  result = await jsonRequest("/api/v1/direct-links", { method: "PATCH", body: { id: paidDirectLinkId } }, personalCookie);
+  expectStatus(result.response.status, 200, "revoke paid API direct link", result.body);
 
   response = await request(staticApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway static JSON call", await response.text());

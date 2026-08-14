@@ -2,12 +2,20 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { issueApiKey } from "@/lib/server/api-key";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
-import { getApplication } from "@/lib/server/applications";
+import { getApplication, listApplications } from "@/lib/server/applications";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
 
 const createSchema = z.object({ name: z.string().trim().min(2).max(80), environment: z.enum(["TEST", "PRODUCTION"]) }).strict();
 const updateSchema = z.object({ id: z.string().min(1), status: z.enum(["active", "paused"]) }).strict();
+
+export async function GET() {
+  const user = await getCurrentUser();
+  if (!user) return Response.json({ code: 401, message: "请先登录" }, { status: 401, headers: noStoreHeaders });
+  const workspace = await getCurrentWorkspace(user);
+  if (!workspace) return Response.json({ code: 409, message: "当前账号没有工作区" }, { status: 409, headers: noStoreHeaders });
+  return Response.json({ code: 200, data: await listApplications(workspace.tenantId) }, { headers: noStoreHeaders });
+}
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();

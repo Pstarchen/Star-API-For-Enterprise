@@ -111,17 +111,33 @@ export async function POST(request: Request) {
 export async function DELETE(request: Request) {
   const auth = await admin();
   if ("error" in auth) return auth.error;
-  const id = new URL(request.url).searchParams.get("id");
-  if (!id) return Response.json({ code: 400, message: "缺少内容 ID" }, { status: 400, headers: noStoreHeaders });
-  const asset = await prisma.apiAsset.findUnique({ where: { id }, include: { product: { select: { id: true, slug: true, provider: { select: { ownerTenantId: true } } } } } });
-  if (!asset) return Response.json({ code: 404, message: "内容不存在" }, { status: 404, headers: noStoreHeaders });
-  if (!auth.isAdmin && asset.product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
-  if (asset.kind === "PHP_SOURCE") return Response.json({ code: 409, message: "PHP 程序包必须通过上传新 ZIP 整体替换" }, { status: 409, headers: noStoreHeaders });
-  await prisma.$transaction([
-    prisma.apiAsset.delete({ where: { id } }),
-    prisma.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: "api.content.delete", resource: "api-product", resourceId: asset.product.id, metadata: { assetId: asset.id, name: asset.name }, ipAddress: requestIp(request) } }),
-  ]);
-  if (["IMAGE", "VIDEO"].includes(asset.kind)) await removeStoredMedia(asset.storageKey).catch(() => undefined);
+  const url = new URL(request.url);
+  const id = url.searchParams.get("id");
+  const productId = url.searchParams.get("productId") ?? "";
+  const clearAll = url.searchParams.get("all") === "true";
+  const body = id || clearAll ? null : await request.json().catch(() => null) as { ids?: unknown } | null;
+  const requestedIds = id ? [id] : Array.isArray(body?.ids) ? [...new Set(body.ids.filter((item): item is string => typeof item === "string" && item.length > 0))] : [];
+  if (!clearAll && !requestedIds.length) return Response.json({ code: 400, message: "请选择要删除的内容" }, { status: 400, headers: noStoreHeaders });
+  if (requestedIds.length > 500) return Response.json({ code: 400, message: "单次最多删除 500 项内容" }, { status: 400, headers: noStoreHeaders });
+
+  const assets = clearAll
+    ? await prisma.apiAsset.findMany({ where: { productId }, select: { id: true, productId: true, kind: true, name: true, storageKey: true } })
+    : await prisma.apiAsset.findMany({ where: { id: { in: requestedIds } }, select: { id: true, productId: true, kind: true, name: true, storageKey: true } });
+  if (!clearAll && assets.length !== requestedIds.length) return Response.json({ code: 404, message: "部分内容不存在，请刷新后重试" }, { status: 404, headers: noStoreHeaders });
+  const targetProductId = productId || assets[0]?.productId || "";
+  if (!targetProductId || assets.some((asset) => asset.productId !== targetProductId)) return Response.json({ code: 400, message: "不能跨 API 批量删除内容" }, { status: 400, headers: noStoreHeaders });
+  const product = await prisma.apiProduct.findUnique({ where: { id: targetProductId }, select: { id: true, internalHandler: true, provider: { select: { ownerTenantId: true } } } });
+  if (!product) return Response.json({ code: 404, message: "API 不存在" }, { status: 404, headers: noStoreHeaders });
+  if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
+  if (product.internalHandler === phpHandlerId || assets.some((asset) => asset.kind === "PHP_SOURCE")) return Response.json({ code: 409, message: "PHP 程序包必须通过上传新 ZIP 整体替换" }, { status: 409, headers: noStoreHeaders });
+  if (!assets.length) return Response.json({ code: 200, message: "当前没有可清除的内容", data: { deleted: 0 } }, { headers: noStoreHeaders });
+
+  await prisma.$transaction(async (transaction) => {
+    if (!(await lockApiProduct(transaction, targetProductId))) throw new Error("API_NOT_FOUND");
+    await transaction.apiAsset.deleteMany({ where: { id: { in: assets.map((asset) => asset.id) }, productId: targetProductId } });
+    await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: clearAll ? "api.content.clear" : assets.length > 1 ? "api.content.batch-delete" : "api.content.delete", resource: "api-product", resourceId: targetProductId, metadata: { count: assets.length, assetIds: assets.slice(0, 500).map((asset) => asset.id), names: assets.slice(0, 20).map((asset) => asset.name) }, ipAddress: requestIp(request) } });
+  });
+  await Promise.allSettled(assets.flatMap((asset) => ["IMAGE", "VIDEO"].includes(asset.kind) && asset.storageKey ? [removeStoredMedia(asset.storageKey)] : []));
   revalidatePath("/", "layout");
-  return Response.json({ code: 200, message: "内容已删除" }, { headers: noStoreHeaders });
+  return Response.json({ code: 200, message: clearAll ? `已清空 ${assets.length} 项内容` : `已删除 ${assets.length} 项内容`, data: { deleted: assets.length } }, { headers: noStoreHeaders });
 }

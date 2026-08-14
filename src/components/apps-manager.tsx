@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Copy, ExternalLink, KeyRound, Link2, Loader2, Pause, Play, Plus, ShieldX, Trash2 } from "lucide-react";
-import { type FormEvent, type ReactNode, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { ApplicationView } from "@/lib/applications";
 import type { CatalogProduct } from "@/lib/catalog";
 import { Button } from "./ui/button";
@@ -31,6 +31,32 @@ export function AppsManager({ initialApps, products, context = "developer" }: { 
   const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [confirmError, setConfirmError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    let refreshing = false;
+    async function refreshUsage() {
+      if (!active || refreshing || document.visibilityState !== "visible") return;
+      refreshing = true;
+      try {
+        const response = await fetch("/api/v1/apps", { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        if (active && response.ok && Array.isArray(result?.data)) setApps(result.data);
+      } catch {
+        // Keep the current application data when a background refresh is unavailable.
+      } finally {
+        refreshing = false;
+      }
+    }
+    const onVisible = () => { if (document.visibilityState === "visible") void refreshUsage(); };
+    window.addEventListener("focus", refreshUsage);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refreshUsage);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   function replace(next: ApplicationView) {
     setApps((items) => items.map((item) => item.id === next.id ? next : item));
