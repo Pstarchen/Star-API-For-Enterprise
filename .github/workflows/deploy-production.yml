@@ -34,7 +34,8 @@ jobs:
       DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
       PUBLIC_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
       RELEASE_IMAGE_NAMESPACE: ghcr.io/pstarchen
-      PRODUCTION_IMAGE_PROXIES: ${{ vars.PRODUCTION_IMAGE_PROXIES || 'ghcr.nju.edu.cn,ghcr.1ms.run,ghcr.chenby.cn' }}
+      PRODUCTION_UPDATE_REGION: ${{ vars.PRODUCTION_UPDATE_REGION || 'cn' }}
+      PRODUCTION_IMAGE_PROXIES: ${{ vars.PRODUCTION_IMAGE_PROXIES || 'ghcr.1ms.run,ghcr.chenby.cn,ghcr.nju.edu.cn' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -74,6 +75,10 @@ jobs:
           }
           [[ "$PRODUCTION_IMAGE_PROXIES" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]] || {
             echo "PRODUCTION_IMAGE_PROXIES must be a comma-separated list of registry hosts." >&2
+            exit 1
+          }
+          [[ "$PRODUCTION_UPDATE_REGION" =~ ^(cn|global)$ ]] || {
+            echo "PRODUCTION_UPDATE_REGION must be cn or global." >&2
             exit 1
           }
           git rev-parse --verify "refs/tags/v${DEPLOY_VERSION}^{commit}" >/dev/null || {
@@ -196,8 +201,17 @@ jobs:
               echo "Official image digest is unavailable for $image on $remote_platform." >&2
               exit 1
             }
+            official_ref="${image%:*}@${official_digest}"
             proxy_loaded=0
+            if [[ "$PRODUCTION_UPDATE_REGION" == "global" ]]; then
+              echo "Pulling $image directly from GHCR with official digest $official_digest"
+              if timeout 20m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker pull --platform "$remote_platform" "$official_ref"; then
+                timeout 30 ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker tag "$official_ref" "$image"
+                proxy_loaded=1
+              fi
+            fi
             for proxy in "${image_proxies[@]}"; do
+              [[ "$proxy_loaded" == "0" ]] || break
               proxy_ref="${proxy}/${image#ghcr.io/}@${official_digest}"
               echo "Pulling $image through $proxy with official digest $official_digest"
               if timeout 20m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker pull --platform "$remote_platform" "$proxy_ref"; then
@@ -206,6 +220,13 @@ jobs:
                 break
               fi
             done
+            if [[ "$proxy_loaded" == "0" && "$PRODUCTION_UPDATE_REGION" == "cn" ]]; then
+              echo "Domestic mirrors failed; falling back to official GHCR for $image"
+              if timeout 20m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker pull --platform "$remote_platform" "$official_ref"; then
+                timeout 30 ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker tag "$official_ref" "$image"
+                proxy_loaded=1
+              fi
+            fi
             [[ "$proxy_loaded" == "1" ]] || {
               echo "All production image proxies failed for $image." >&2
               exit 1
@@ -214,17 +235,19 @@ jobs:
 
           remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
-          timeout 120m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" "$PRODUCTION_IMAGE_PROXIES" <<'REMOTE'
+          timeout 120m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" "$PRODUCTION_IMAGE_PROXIES" "$PRODUCTION_UPDATE_REGION" <<'REMOTE'
           set -Eeuo pipefail
 
           version="$1"
           deploy_path="$2"
           payload_archive="$3"
           image_proxies="$4"
+          update_region="$5"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
           [[ "$payload_archive" == "$deploy_path/.deploy-tmp"/star-api-deploy-*.tar.gz ]]
           [[ "$image_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]]
+          [[ "$update_region" =~ ^(cn|global)$ ]]
           cd -- "$deploy_path"
           test -f .env.production
           test -f compose.production.yml
@@ -256,7 +279,11 @@ jobs:
           install -m 700 "$payload_dir/process-local-update.sh" "$deploy_path/scripts/process-local-update.sh"
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_DEFAULT_IMAGE_PROXIES="$image_proxies" \
+          STAR_API_DEFAULT_UPDATE_REGION="$update_region" \
             bash "$payload_dir/production.sh" enable-updates
+          command -v star-api >/dev/null
+          systemctl is-enabled --quiet star-api-local-update.path
+          systemctl is-active --quiet star-api-local-update.path
 
           compose=(docker compose --env-file .env.production -f compose.production.yml)
           for service in postgres redis app php-runner; do
@@ -275,6 +302,13 @@ jobs:
               exit 1
             }
           done
+          php_runner_id="$("${compose[@]}" ps --quiet php-runner)"
+          docker exec "$php_runner_id" php83 -r '
+            $gd = extension_loaded("gd") ? gd_info() : [];
+            if (!extension_loaded("exif") || !function_exists("imagettftext") || empty($gd["FreeType Support"]) || empty($gd["JPEG Support"])) exit(1);
+            echo "PHP Runner GD, JPEG, FreeType and EXIF: ready" . PHP_EOL;
+          '
+          (cd /tmp && star-api doctor)
           app_port="$(sed -n 's/^APP_PORT=//p' .env.production | tail -n 1 | tr -d '\r')"
           app_port="${app_port:-18081}"
           curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${app_port}/api/health"

@@ -17,6 +17,7 @@ Commands:
   update X.Y.Z  Update to a specific stable version.
   check         Check whether a newer stable image is available.
   token         Print the first-install token from the running app container.
+  doctor        Check containers, the local update watcher, and the health endpoint.
   enable-updates
                 Enable host-local admin UI updates with a systemd path service.
   enable-github-updates
@@ -28,6 +29,8 @@ Environment overrides:
   STAR_API_ENV_FILE       Defaults to .env.production.
   STAR_API_COMPOSE_FILE   Defaults to compose.production.yml.
   STAR_API_PROJECT_DIR    Defaults to this repository.
+  STAR_API_MANAGEMENT_COMMAND_PATH
+                          Defaults to /usr/local/bin/star-api.
 USAGE
 }
 
@@ -90,19 +93,51 @@ local_update_state_dir() {
 }
 
 configure_local_updates() {
-  local state_dir default_proxies
+  local state_dir default_proxies default_region current_proxies
   state_dir="$(local_update_state_dir)"
   [[ "$project_dir" =~ ^/[A-Za-z0-9._/-]+$ && "$state_dir" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
     echo "Local updates require project and state paths without spaces or shell metacharacters." >&2
     exit 1
   }
-  default_proxies="${STAR_API_DEFAULT_IMAGE_PROXIES:-ghcr.nju.edu.cn,ghcr.1ms.run,ghcr.chenby.cn}"
+  default_proxies="${STAR_API_DEFAULT_IMAGE_PROXIES:-ghcr.1ms.run,ghcr.chenby.cn,ghcr.nju.edu.cn}"
+  default_region="${STAR_API_DEFAULT_UPDATE_REGION:-auto}"
   [[ "$default_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]] || { echo "STAR_API_DEFAULT_IMAGE_PROXIES is invalid." >&2; exit 1; }
+  [[ "$default_region" =~ ^(auto|cn|global)$ ]] || { echo "STAR_API_DEFAULT_UPDATE_REGION is invalid." >&2; exit 1; }
   [[ ! -L "$state_dir" && ! -L "$state_dir/inbox" ]] || { echo "Local update directories must not be symbolic links." >&2; exit 1; }
   set_env_value STAR_API_UPDATE_STATE_DIR "$state_dir"
-  if [[ -z "$(env_value STAR_API_IMAGE_PROXIES)" ]]; then set_env_value STAR_API_IMAGE_PROXIES "$default_proxies"; fi
+  if [[ -z "$(env_value STAR_API_UPDATE_REGION)" ]]; then set_env_value STAR_API_UPDATE_REGION "$default_region"; fi
+  current_proxies="$(env_value STAR_API_IMAGE_PROXIES)"
+  if [[ -z "$current_proxies" || "$current_proxies" == "ghcr.nju.edu.cn,ghcr.1ms.run,ghcr.chenby.cn" ]]; then
+    set_env_value STAR_API_IMAGE_PROXIES "$default_proxies"
+  fi
   install -d -m 0750 -o 0 -g 1001 "$state_dir"
   install -d -m 0770 -o 1001 -g 1001 "$state_dir/inbox"
+}
+
+install_management_command() {
+  local command_path command_dir temporary bash_path
+  [[ "$EUID" -eq 0 ]] || { echo "Install the management command as root." >&2; exit 1; }
+  command_path="${STAR_API_MANAGEMENT_COMMAND_PATH:-/usr/local/bin/star-api}"
+  [[ "$command_path" =~ ^/[A-Za-z0-9._/-]+$ && "$command_path" != "/" ]] || {
+    echo "STAR_API_MANAGEMENT_COMMAND_PATH is invalid." >&2
+    exit 1
+  }
+  command_dir="$(dirname -- "$command_path")"
+  install -d -m 0755 "$command_dir"
+  bash_path="$(command -v bash)"
+  mkdir -p "$project_dir/.deploy-tmp"
+  temporary="$(mktemp "$project_dir/.deploy-tmp/command.XXXXXXXX")"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'set -Eeuo pipefail\n'
+    printf 'export STAR_API_PROJECT_DIR=%q\n' "$project_dir"
+    printf 'export STAR_API_ENV_FILE=%q\n' "$env_file"
+    printf 'export STAR_API_COMPOSE_FILE=%q\n' "$compose_file"
+    printf 'exec %q %q "$@"\n' "$bash_path" "$project_dir/scripts/production.sh"
+  } > "$temporary"
+  install -m 0755 "$temporary" "$command_path"
+  rm -f -- "$temporary"
+  echo "Management command installed: $command_path"
 }
 
 install_local_update_units() {
@@ -147,6 +182,7 @@ UNIT
   install -m 0644 "$temporary/star-api-local-update.path" "$unit_dir/star-api-local-update.path"
   rm -rf -- "$temporary"
   install -m 0640 -o 0 -g 1001 /dev/null "$state_dir/enabled"
+  install_management_command
   systemctl daemon-reload
   systemctl enable --now star-api-local-update.path
 }
@@ -181,7 +217,7 @@ case "$command_name" in
     if [[ "$local_updates_available" == "1" ]]; then
       install_local_update_units
     else
-      echo "Run 'sudo bash scripts/production.sh enable-updates' to enable platform-admin updates."
+      printf "Run 'sudo %s/scripts/production.sh enable-updates' to enable platform-admin updates.\n" "$project_dir"
     fi
     compose ps
     ;;
@@ -202,6 +238,23 @@ case "$command_name" in
     ensure_compose
     [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
     compose exec app node /app/scripts/show-install-token.mjs
+    ;;
+  doctor)
+    [[ $# -eq 0 ]] || { usage >&2; exit 2; }
+    ensure_compose
+    require_command curl
+    [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
+    printf 'Star-API version: %s\n' "$(env_value STAR_API_VERSION)"
+    compose ps
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-enabled --quiet star-api-local-update.path && systemctl is-active --quiet star-api-local-update.path; then
+      echo "Local update watcher: enabled and active"
+    else
+      echo "Local update watcher: not active"
+    fi
+    app_port="$(env_value APP_PORT)"; app_port="${app_port:-18081}"
+    health_url="${STAR_API_HEALTH_URL:-http://127.0.0.1:${app_port}/api/health}"
+    curl --fail --silent --show-error --max-time 10 "$health_url"
+    printf '\nHealth endpoint: %s\n' "$health_url"
     ;;
   enable-updates)
     [[ $# -eq 0 ]] || { usage >&2; exit 2; }

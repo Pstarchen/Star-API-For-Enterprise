@@ -59,6 +59,25 @@ jobs:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
           push: false
+          load: true
           tags: ${{ matrix.tag }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+      - name: Verify PHP image extensions
+        if: matrix.name == 'php-runner'
+        shell: bash
+        run: |
+          docker run --rm --entrypoint php83 star-api-php-runner:ci -r '
+            $gd = extension_loaded("gd") ? gd_info() : [];
+            $valid = extension_loaded("curl")
+              && extension_loaded("exif")
+              && extension_loaded("gd")
+              && function_exists("imagettftext")
+              && !empty($gd["FreeType Support"])
+              && !empty($gd["JPEG Support"]);
+            if (!$valid) {
+              fwrite(STDERR, json_encode($gd, JSON_UNESCAPED_SLASHES) . PHP_EOL);
+              exit(1);
+            }
+            echo "GD, JPEG, FreeType, EXIF and curl are available." . PHP_EOL;
+          '

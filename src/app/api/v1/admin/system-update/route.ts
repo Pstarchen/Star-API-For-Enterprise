@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     await triggerSystemUpdate(parsed.data.version);
     return Response.json({ code: 202, message: "已提交生产更新任务，请稍后刷新查看进度", data: await getSystemUpdateStatus() }, { status: 202, headers: noStoreHeaders });
   } catch (error) {
-    if (error instanceof Error && error.message === "UPDATE_DISABLED") return Response.json({ code: 409, message: "尚未启用本机更新服务，请先在服务器运行 production:enable-updates" }, { status: 409, headers: noStoreHeaders });
+    if (error instanceof Error && error.message === "UPDATE_DISABLED") return Response.json({ code: 409, message: "宿主机更新服务尚未启用，请运行 sudo star-api enable-updates" }, { status: 409, headers: noStoreHeaders });
     if (error instanceof Error && error.message === "UPDATE_IN_PROGRESS") return Response.json({ code: 409, message: "已有更新任务正在排队或执行" }, { status: 409, headers: noStoreHeaders });
     if (error instanceof Error && error.message === "INVALID_VERSION") return Response.json({ code: 400, message: "更新版本不正确" }, { status: 400, headers: noStoreHeaders });
     return Response.json({ code: 502, message: "无法提交更新任务，请检查本机更新服务状态" }, { status: 502, headers: noStoreHeaders });

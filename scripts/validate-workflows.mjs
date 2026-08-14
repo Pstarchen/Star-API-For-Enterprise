@@ -47,6 +47,13 @@ assert(deployScript.includes('bash "$payload_dir/update-production.sh" --check "
 assert(deployScript.includes('bash "$payload_dir/update-production.sh" "$version" </dev/null'), "Production update must not consume the remote script stream");
 assert(deployScript.includes('"$remote_payload" "$PRODUCTION_IMAGE_PROXIES"'), "Production deploy must pass image proxies into the remote script");
 assert(deployScript.includes('STAR_API_DEFAULT_IMAGE_PROXIES="$image_proxies"'), "Remote update setup must use the validated proxy argument");
+assert(deployScript.includes('"$PRODUCTION_IMAGE_PROXIES" "$PRODUCTION_UPDATE_REGION"'), "Production deploy must pass the update region into the remote script");
+assert(deployScript.includes('STAR_API_DEFAULT_UPDATE_REGION="$update_region"'), "Remote update setup must persist the validated update region");
+assert(deployScript.includes('Pulling $image directly from GHCR'), "Global deployments must prefer official GHCR images");
+assert(deployScript.includes('Domestic mirrors failed; falling back to official GHCR'), "Domestic deployments must retain an official GHCR fallback");
+assert(deployScript.includes('systemctl is-active --quiet star-api-local-update.path'), "Production deploy must verify the local update watcher");
+assert(deployScript.includes('(cd /tmp && star-api doctor)'), "Production deploy must verify the directory-independent management command");
+assert(deployScript.includes('PHP Runner GD, JPEG, FreeType and EXIF: ready'), "Production deploy must verify PHP image extensions");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {

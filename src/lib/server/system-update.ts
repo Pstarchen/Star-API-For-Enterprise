@@ -23,8 +23,14 @@ export type SystemUpdateStatus = {
   updateEnabled: boolean;
   updateProvider: "local" | "github-actions" | "disabled";
   updateSource: "custom-feed" | "configured-version" | "ghcr" | "unavailable";
+  updateRegion: "auto" | "cn" | "global";
   lastRun: SystemUpdateRun | null;
 };
+
+function updateRegion(): SystemUpdateStatus["updateRegion"] {
+  const configured = process.env.STAR_API_UPDATE_REGION?.trim();
+  return configured === "cn" || configured === "global" ? configured : "auto";
+}
 
 function currentVersion() {
   return process.env.APP_VERSION || process.env.STAR_API_VERSION || "0.1.0";
@@ -129,6 +135,7 @@ export async function getSystemUpdateStatus(): Promise<SystemUpdateStatus> {
     updateEnabled: updateProvider !== "disabled",
     updateProvider,
     updateSource: latest.source,
+    updateRegion: updateRegion(),
     lastRun,
   };
 }

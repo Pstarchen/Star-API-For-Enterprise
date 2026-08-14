@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -26,6 +26,7 @@
     "production:check": "bash scripts/production.sh check",
     "production:update": "bash scripts/production.sh update",
     "production:token": "bash scripts/production.sh token",
+    "production:doctor": "bash scripts/production.sh doctor",
     "production:enable-updates": "bash scripts/production.sh enable-updates",
     "production:enable-github-updates": "bash scripts/production.sh enable-github-updates",
     "production:status": "bash scripts/production.sh status",

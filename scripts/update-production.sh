@@ -36,7 +36,7 @@ if [[ "${1:-}" == "--check" ]]; then mode="check"; shift; fi
 if [[ $# -gt 1 ]]; then usage >&2; exit 2; fi
 requested_version="${1:-latest}"
 
-for command in awk chmod cp curl date docker find flock grep head install jq mkdir mktemp mv rm sed seq sleep sort tail tar timeout tr uname; do
+for command in awk cat chmod cp curl date docker find flock grep head install jq mkdir mktemp mv readlink rm sed seq sleep sort tail tar timeout tr uname; do
   command -v "$command" >/dev/null 2>&1 || { echo "Required command is missing: $command" >&2; exit 1; }
 done
 [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
@@ -64,9 +64,25 @@ current_version="$(env_value STAR_API_VERSION)"
 app_image="$(env_value STAR_API_APP_IMAGE)"; app_image="${app_image:-ghcr.io/pstarchen/star-api-app}"
 migrator_image="$(env_value STAR_API_MIGRATOR_IMAGE)"; migrator_image="${migrator_image:-ghcr.io/pstarchen/star-api-migrator}"
 php_runner_image="$(env_value STAR_API_PHP_RUNNER_IMAGE)"; php_runner_image="${php_runner_image:-ghcr.io/pstarchen/star-api-php-runner}"
+configured_latest_version="$(env_value STAR_API_UPDATE_LATEST_VERSION)"
+update_feed_url="$(env_value STAR_API_UPDATE_FEED_URL)"
+if [[ -n "$configured_latest_version" && ! "$configured_latest_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "STAR_API_UPDATE_LATEST_VERSION must use X.Y.Z format." >&2
+  exit 2
+fi
+if [[ -n "$update_feed_url" && ! "$update_feed_url" =~ ^https?://[^[:space:]]+$ ]]; then
+  echo "STAR_API_UPDATE_FEED_URL must be an HTTP(S) URL." >&2
+  exit 2
+fi
 image_proxies="${STAR_API_IMAGE_PROXIES:-$(env_value STAR_API_IMAGE_PROXIES)}"
 if [[ -n "$image_proxies" && ! "$image_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]]; then
   echo "STAR_API_IMAGE_PROXIES must be a comma-separated list of registry hosts." >&2
+  exit 2
+fi
+update_region="${STAR_API_UPDATE_REGION:-$(env_value STAR_API_UPDATE_REGION)}"
+update_region="${update_region:-auto}"
+if [[ ! "$update_region" =~ ^(auto|cn|global)$ ]]; then
+  echo "STAR_API_UPDATE_REGION must be auto, cn, or global." >&2
   exit 2
 fi
 image_pull_timeout="${STAR_API_IMAGE_PULL_TIMEOUT:-$(env_value STAR_API_IMAGE_PULL_TIMEOUT)}"
@@ -101,6 +117,19 @@ stable_versions() {
     | jq -er '.tags // [] | .[]' \
     | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
     | sort -Vu
+}
+
+latest_stable_version() {
+  if [[ -n "$configured_latest_version" ]]; then
+    printf '%s\n' "$configured_latest_version"
+    return
+  fi
+  if [[ -n "$update_feed_url" ]]; then
+    curl --fail --silent --show-error --connect-timeout 8 --max-time 20 "$update_feed_url" \
+      | jq -er '(.latestVersion // .version) | select(type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))'
+    return
+  fi
+  stable_versions | tail -n 1
 }
 
 ghcr_token() {
@@ -158,6 +187,20 @@ image_available_locally() {
   docker image inspect "$image:$version" >/dev/null 2>&1
 }
 
+resolved_update_region() {
+  if [[ "$update_region" != "auto" ]]; then
+    printf '%s\n' "$update_region"
+    return
+  fi
+  local timezone="${TZ:-}"
+  if [[ -z "$timezone" && -r /etc/timezone ]]; then timezone="$(cat /etc/timezone 2>/dev/null || true)"; fi
+  if [[ -z "$timezone" ]]; then timezone="$(readlink /etc/localtime 2>/dev/null || true)"; fi
+  case "$timezone" in
+    *Asia/Shanghai*|*Asia/Chongqing*|*Asia/Urumqi*|*Asia/Hong_Kong*|*Asia/Macau*) printf '%s\n' cn ;;
+    *) printf '%s\n' global ;;
+  esac
+}
+
 pull_image_through_proxy() {
   local image="$1" version="$2" digest platform image_repository proxy proxy_ref
   [[ -n "$image_proxies" && "$image" == ghcr.io/* ]] || return 1
@@ -180,9 +223,16 @@ pull_image_through_proxy() {
 pull_image() {
   local image="$1"
   local version="$2"
+  local region
   if image_available_locally "$image" "$version"; then
     echo "Image is already present locally: $image:$version"
     return 0
+  fi
+  region="$(resolved_update_region)"
+  if [[ "$region" == "global" ]]; then
+    if timeout "$image_pull_timeout" docker pull "$image:$version"; then return 0; fi
+    pull_image_through_proxy "$image" "$version"
+    return
   fi
   if pull_image_through_proxy "$image" "$version"; then return 0; fi
   timeout "$image_pull_timeout" docker pull "$image:$version"
@@ -232,7 +282,7 @@ install_release_file() {
 }
 
 if [[ "$requested_version" == "latest" ]]; then
-  target_version="$(retry_command "Latest-version discovery from GHCR" 3 8 stable_versions | tail -n 1)"
+  target_version="$(retry_command "Latest-version discovery" 3 8 latest_stable_version)"
 else
   target_version="${requested_version#v}"
   [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Version must use X.Y.Z format." >&2; exit 2; }
@@ -241,6 +291,7 @@ fi
 
 echo "Current version: $current_version"
 echo "Target version:  $target_version"
+echo "Update region:  $(resolved_update_region)"
 
 for image in "$app_image" "$migrator_image" "$php_runner_image"; do
   echo "Checking $image:$target_version"

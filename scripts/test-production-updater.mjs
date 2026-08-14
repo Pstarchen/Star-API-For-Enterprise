@@ -45,6 +45,9 @@ case "$*" in
   *"https://ghcr.io/v2/pstarchen/star-api-app/tags/list"*)
     printf '%s\\n' '{"name":"pstarchen/star-api-app","tags":["sha-deadbeef","0.1.4","0.1.6-rc.1","0.1.6"]}'
     ;;
+  *"https://updates.example.com/star-api/stable.json"*)
+    printf '%s\n' '{"latestVersion":"0.1.6"}'
+    ;;
   *"https://ghcr.io/v2/"*"/manifests/0.1.6"*)
     printf '%s\n' '{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":{"os":"linux","architecture":"amd64"}}]}'
     ;;
@@ -102,6 +105,23 @@ const latestCommands = readFileSync(log, "utf8");
 assert.equal((latestCommands.match(/\/tags\/list$/gm) ?? []).length, 1);
 assert.equal((latestCommands.match(/\/manifests\/0\.1\.6$/gm) ?? []).length, 3);
 
+writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_UPDATE_FEED_URL=https://updates.example.com/star-api/stable.json\n");
+writeFileSync(log, "");
+const feedResult = spawnSync("bash", [updater, "--check"], {
+  cwd: project,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    STAR_API_PROJECT_DIR: project,
+    STAR_API_TEST_LOG: log,
+  },
+});
+assert.equal(feedResult.status, 0, feedResult.stderr || feedResult.stdout);
+const feedCommands = readFileSync(log, "utf8");
+assert.equal((feedCommands.match(/updates\.example\.com\/star-api\/stable\.json$/gm) ?? []).length, 1);
+assert.doesNotMatch(feedCommands, /\/tags\/list$/m);
+
 writeFileSync(log, "");
 const localImagesResult = spawnSync("bash", [updater, "--check", "0.1.6"], {
   cwd: project,
@@ -152,7 +172,7 @@ const customTimeoutResult = spawnSync("bash", [updater, "0.1.6"], {
 assert.equal(customTimeoutResult.status, 0, customTimeoutResult.stderr || customTimeoutResult.stdout);
 assert.equal((readFileSync(log, "utf8").match(/^timeout 900 docker pull /gm) ?? []).length, 3);
 
-writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\nSTAR_API_IMAGE_PROXIES=ghcr.nju.edu.cn\n");
+writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\nSTAR_API_UPDATE_REGION=cn\nSTAR_API_IMAGE_PROXIES=ghcr.nju.edu.cn\n");
 writeFileSync(log, "");
 const proxyResult = spawnSync("bash", [updater, "0.1.6"], {
   cwd: project,
@@ -171,6 +191,23 @@ assert.equal((proxyCommands.match(/^timeout 900 docker pull --platform linux\/am
 assert.equal((proxyCommands.match(/^tag ghcr\.nju\.edu\.cn\/pstarchen\/star-api-[^@]+@sha256:a{64} ghcr\.io\/pstarchen\/star-api-[^:]+:0\.1\.6$/gm) ?? []).length, 3);
 assert.equal((proxyCommands.match(/^timeout 900 docker pull ghcr\.io\//gm) ?? []).length, 0);
 
+writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\nSTAR_API_UPDATE_REGION=global\nSTAR_API_IMAGE_PROXIES=ghcr.nju.edu.cn\n");
+writeFileSync(log, "");
+const globalResult = spawnSync("bash", [updater, "0.1.6"], {
+  cwd: project,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    STAR_API_PROJECT_DIR: project,
+    STAR_API_TEST_LOG: log,
+  },
+});
+assert.equal(globalResult.status, 0, globalResult.stderr || globalResult.stdout);
+const globalCommands = readFileSync(log, "utf8");
+assert.equal((globalCommands.match(/^timeout 900 docker pull ghcr\.io\//gm) ?? []).length, 3);
+assert.equal((globalCommands.match(/^timeout 900 docker pull --platform /gm) ?? []).length, 0);
+
 writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nSTAR_API_IMAGE_PULL_TIMEOUT=30\n");
 const invalidTimeoutResult = spawnSync("bash", [updater, "--check", "0.1.6"], {
   cwd: project,
@@ -185,4 +222,18 @@ const invalidTimeoutResult = spawnSync("bash", [updater, "--check", "0.1.6"], {
 
 assert.equal(invalidTimeoutResult.status, 2);
 assert.match(invalidTimeoutResult.stderr, /STAR_API_IMAGE_PULL_TIMEOUT must be an integer between 60 and 7200 seconds/);
+
+writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nSTAR_API_UPDATE_REGION=unknown\n");
+const invalidRegionResult = spawnSync("bash", [updater, "--check", "0.1.6"], {
+  cwd: project,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    STAR_API_PROJECT_DIR: project,
+    STAR_API_TEST_LOG: log,
+  },
+});
+assert.equal(invalidRegionResult.status, 2);
+assert.match(invalidRegionResult.stderr, /STAR_API_UPDATE_REGION must be auto, cn, or global/);
 console.log("Validated explicit and GHCR-discovered production update checks.");

@@ -2,9 +2,20 @@ ARG ALPINE_IMAGE=m.daocloud.io/docker.io/library/alpine:3.20
 FROM ${ALPINE_IMAGE}
 
 # PHP packages uploaded by administrators are allowed to call common PHP
-# extensions used by small API scripts. curl and openssl cover upstream HTTP
-# calls; mbstring/iconv/json/fileinfo improve compatibility with older samples.
-RUN apk add --no-cache php83 php83-cgi php83-curl php83-fileinfo php83-iconv php83-mbstring php83-openssl
+# extensions used by small API scripts. GD includes JPEG and FreeType support;
+# DejaVu provides a predictable font for scripts that render text into images.
+RUN apk add --no-cache \
+    fontconfig \
+    php83 \
+    php83-cgi \
+    php83-curl \
+    php83-exif \
+    php83-fileinfo \
+    php83-gd \
+    php83-iconv \
+    php83-mbstring \
+    php83-openssl \
+    ttf-dejavu
 
 WORKDIR /runner
 COPY server.php /runner/server.php
