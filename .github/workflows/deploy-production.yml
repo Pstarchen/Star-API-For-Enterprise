@@ -214,15 +214,17 @@ jobs:
 
           remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
-          timeout 120m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" <<'REMOTE'
+          timeout 120m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" bash -s -- "$DEPLOY_VERSION" "$DEPLOY_PATH" "$remote_payload" "$PRODUCTION_IMAGE_PROXIES" <<'REMOTE'
           set -Eeuo pipefail
 
           version="$1"
           deploy_path="$2"
           payload_archive="$3"
+          image_proxies="$4"
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$deploy_path" == /* && "$deploy_path" != "/" ]]
           [[ "$payload_archive" == "$deploy_path/.deploy-tmp"/star-api-deploy-*.tar.gz ]]
+          [[ "$image_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]]
           cd -- "$deploy_path"
           test -f .env.production
           test -f compose.production.yml
@@ -253,7 +255,7 @@ jobs:
           install -m 700 "$payload_dir/production.sh" "$deploy_path/scripts/production.sh"
           install -m 700 "$payload_dir/process-local-update.sh" "$deploy_path/scripts/process-local-update.sh"
           STAR_API_PROJECT_DIR="$deploy_path" \
-          STAR_API_DEFAULT_IMAGE_PROXIES="$PRODUCTION_IMAGE_PROXIES" \
+          STAR_API_DEFAULT_IMAGE_PROXIES="$image_proxies" \
             bash "$payload_dir/production.sh" enable-updates
 
           compose=(docker compose --env-file .env.production -f compose.production.yml)

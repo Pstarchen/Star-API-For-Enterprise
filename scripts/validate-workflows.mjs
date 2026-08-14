@@ -45,6 +45,8 @@ assert(deployScript.includes('process-local-update.sh'), "Production deploy must
 assert(deployScript.includes('bash "$payload_dir/production.sh" enable-updates'), "Production deploy must enable host-local updates");
 assert(deployScript.includes('bash "$payload_dir/update-production.sh" --check "$version" </dev/null'), "Production preflight must not consume the remote script stream");
 assert(deployScript.includes('bash "$payload_dir/update-production.sh" "$version" </dev/null'), "Production update must not consume the remote script stream");
+assert(deployScript.includes('"$remote_payload" "$PRODUCTION_IMAGE_PROXIES"'), "Production deploy must pass image proxies into the remote script");
+assert(deployScript.includes('STAR_API_DEFAULT_IMAGE_PROXIES="$image_proxies"'), "Remote update setup must use the validated proxy argument");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {
