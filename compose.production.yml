@@ -3,7 +3,6 @@ name: star-api-platform
 services:
   secrets-init:
     image: ${STAR_API_APP_IMAGE:-ghcr.io/pstarchen/star-api-app}:${STAR_API_VERSION:?STAR_API_VERSION is required}
-    pull_policy: always
     restart: "no"
     user: "0:0"
     environment:
@@ -21,7 +20,6 @@ services:
 
   migrate:
     image: ${STAR_API_MIGRATOR_IMAGE:-ghcr.io/pstarchen/star-api-migrator}:${STAR_API_VERSION:?STAR_API_VERSION is required}
-    pull_policy: always
     restart: "no"
     environment:
       STAR_API_SECRETS_DIR: /run/star-api-secrets
@@ -37,7 +35,6 @@ services:
 
   app:
     image: ${STAR_API_APP_IMAGE:-ghcr.io/pstarchen/star-api-app}:${STAR_API_VERSION:?STAR_API_VERSION is required}
-    pull_policy: always
     restart: unless-stopped
     init: true
     environment:
@@ -87,7 +84,6 @@ services:
 
   php-runner:
     image: ${STAR_API_PHP_RUNNER_IMAGE:-ghcr.io/pstarchen/star-api-php-runner}:${STAR_API_VERSION:?STAR_API_VERSION is required}
-    pull_policy: always
     restart: unless-stopped
     environment:
       STAR_API_SECRETS_DIR: /run/star-api-secrets
