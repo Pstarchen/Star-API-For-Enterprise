@@ -33,9 +33,12 @@ const scripts = workflow.jobs.deploy.steps.filter((step) => typeof step.run === 
 assert(scripts.length >= 5, "Expected production validation, deployment, health and cleanup scripts");
 
 const deployScript = workflow.jobs.deploy.steps.find((step) => step.name === "Inspect and update production")?.run ?? "";
-assert(deployScript.includes('docker pull --platform "$remote_platform"'), "Production deploy must pull the matching image architecture on the runner");
-assert(deployScript.includes('docker save "${release_images[@]}"'), "Production deploy must export release images from the runner");
-assert(deployScript.includes('timeout 45m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker load'), "Production deploy must stream release images over verified SSH");
+assert(deployScript.includes('docker pull --platform "$remote_platform"'), "Production deploy must pull the matching image architecture on the server");
+assert(deployScript.includes('docker manifest inspect "$image"'), "Production deploy must inspect the official release manifest");
+assert(deployScript.includes('.platform.architecture == $architecture'), "Production deploy must resolve the matching platform digest");
+assert(deployScript.includes('proxy_ref="${proxy}/${image#ghcr.io/}@${official_digest}"'), "Production deploy proxy pulls must use the official digest");
+assert(deployScript.includes('docker tag "$proxy_ref" "$image"'), "Production deploy must tag verified proxy images with the official name");
+assert(!deployScript.includes('docker save "${release_images[@]}"'), "Production deploy must not stream large image archives over SSH");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {

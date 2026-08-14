@@ -34,6 +34,7 @@ jobs:
       DEPLOY_PATH: ${{ vars.PRODUCTION_DEPLOY_PATH }}
       PUBLIC_HEALTH_URL: ${{ vars.PRODUCTION_HEALTH_URL }}
       RELEASE_IMAGE_NAMESPACE: ghcr.io/pstarchen
+      PRODUCTION_IMAGE_PROXIES: ${{ vars.PRODUCTION_IMAGE_PROXIES || 'ghcr.nju.edu.cn,ghcr.1ms.run,ghcr.chenby.cn' }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -69,6 +70,10 @@ jobs:
           }
           [[ -z "$PUBLIC_HEALTH_URL" || "$PUBLIC_HEALTH_URL" =~ ^https?://[^[:space:]]+/api/health([/?#].*)?$ ]] || {
             echo "PRODUCTION_HEALTH_URL must be an HTTP(S) /api/health URL." >&2
+            exit 1
+          }
+          [[ "$PRODUCTION_IMAGE_PROXIES" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]] || {
+            echo "PRODUCTION_IMAGE_PROXIES must be a comma-separated list of registry hosts." >&2
             exit 1
           }
           git rev-parse --verify "refs/tags/v${DEPLOY_VERSION}^{commit}" >/dev/null || {
@@ -180,13 +185,31 @@ jobs:
             "$RELEASE_IMAGE_NAMESPACE/star-api-php-runner:$DEPLOY_VERSION"
           )
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin >/dev/null
+          IFS=',' read -r -a image_proxies <<< "$PRODUCTION_IMAGE_PROXIES"
+          remote_os="${remote_platform%/*}"
+          remote_architecture="${remote_platform#*/}"
           for image in "${release_images[@]}"; do
-            timeout 20m docker pull --platform "$remote_platform" "$image"
+            manifest="$(timeout 60 docker manifest inspect "$image")"
+            official_digest="$(jq -er --arg os "$remote_os" --arg architecture "$remote_architecture" '.manifests[] | select(.platform.os == $os and .platform.architecture == $architecture) | .digest' <<< "$manifest" | head -n 1)"
+            [[ "$official_digest" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+              echo "Official image digest is unavailable for $image on $remote_platform." >&2
+              exit 1
+            }
+            proxy_loaded=0
+            for proxy in "${image_proxies[@]}"; do
+              proxy_ref="${proxy}/${image#ghcr.io/}@${official_digest}"
+              echo "Pulling $image through $proxy with official digest $official_digest"
+              if timeout 20m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker pull --platform "$remote_platform" "$proxy_ref"; then
+                timeout 30 ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker tag "$proxy_ref" "$image"
+                proxy_loaded=1
+                break
+              fi
+            done
+            [[ "$proxy_loaded" == "1" ]] || {
+              echo "All production image proxies failed for $image." >&2
+              exit 1
+            }
           done
-          echo "Streaming release images to production over the verified SSH connection."
-          docker save "${release_images[@]}" \
-            | gzip -1 \
-            | timeout 45m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker load
 
           remote_payload="$DEPLOY_PATH/.deploy-tmp/star-api-deploy-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.tar.gz"
           timeout 120 scp "${scp_options[@]}" "$RUNNER_TEMP/star-api-deploy.tar.gz" "$SSH_USER@$SSH_HOST:$remote_payload"
