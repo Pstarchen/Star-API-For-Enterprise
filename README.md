@@ -13,6 +13,7 @@
 - 通用数据源：支持 JSON、JSONL / NDJSON、CSV、TSV、YAML / YML 和逐行 TXT；多个文件可分组或合并，并可按任意字段路径筛选记录和提取文本
 - 本地媒体 API：图片和视频流式上传到 Docker 持久卷，校验真实文件格式；随机视频支持 HTTP Range 分段播放，不依赖第三方对象存储
 - 用户控制台：调用概览、应用/密钥、请求日志、Webhook 与账单；企业空间额外承载成员权限和组织设置
+- API 直链：用户可为已订阅的 GET 端点生成、复制和撤销直链；直链继续执行订阅、限流、配额、计费、脱敏和审计规则
 - 运营后台：个人/企业用户管理、API 生命周期、服务商准入、企业组织、风控、审计、网关监控与平台设置
 - 服务端接口：目录查询、沙箱调用、密钥生成、健康检查，统一使用 Zod 校验
 - 数据基础：Prisma + PostgreSQL 多租户模型，Redis 容器用于限流、配额和缓存扩展
@@ -54,7 +55,7 @@ npm run production:token
 sudo star-api doctor
 ```
 
-`production:install` 会在缺少 `.env.production` 时创建配置、拉取镜像并启动服务；在 root + systemd 环境还会自动启用宿主机本地更新服务，并安装与当前目录无关的 `/usr/local/bin/star-api` 管理命令。正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。之后可在任意目录运行 `sudo star-api check`、`sudo star-api update`、`sudo star-api update 0.1.17` 或 `sudo star-api doctor`；更新器会自动备份、迁移并验证健康状态。镜像部署、反代、备份和恢复步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
+`production:install` 会在缺少 `.env.production` 时创建配置、拉取镜像并启动服务；在 root + systemd 环境还会自动启用宿主机本地更新服务，并安装与当前目录无关的 `/usr/local/bin/star-api` 管理命令。正式开放前请先核对 `SITE_ADDRESS`、`API_PUBLIC_URL`、`API_PUBLIC_HOST` 和 `APP_PORT`。之后可在任意目录运行 `sudo star-api check`、`sudo star-api update`、`sudo star-api update 0.1.18` 或 `sudo star-api doctor`；更新器会自动备份、迁移并验证健康状态。镜像部署、反代、备份和恢复步骤见[版本镜像部署指南](docs/IMAGE_DEPLOYMENT.md)。
 
 管理员后台“平台设置”底部的“系统安装与更新”可以直接排队本机更新，不需要 GitHub Token，也不会把 Docker Socket 挂给网站容器。生产部署会自动启用 systemd 监听器；如需人工恢复，可在任意目录运行 `sudo star-api enable-updates`。`STAR_API_UPDATE_REGION=cn` 会优先使用国内摘要校验镜像，`global` 会优先使用官方 GHCR，`auto` 根据服务器时区选择。完全脱离 GitHub 时，将三个 `STAR_API_*_IMAGE` 指向独立镜像仓库，并配置返回 `{"latestVersion":"X.Y.Z"}` 的 `STAR_API_UPDATE_FEED_URL`。
 
@@ -102,6 +103,7 @@ compose.production.yml   版本镜像与外部反代生产编排
 | `GET` | `/api/v1/branding/hero` | 返回数据库中保存的首页首屏图片 |
 | `POST` | `/api/v1/playground` | 沙箱请求校验与响应 |
 | `POST` | `/api/v1/keys` | 一次性签发密钥明文 |
+| `POST/PATCH` | `/api/v1/direct-links` | 为已订阅的 GET 端点生成或撤销直链 |
 | `GET/POST` | `/api/v1/install` | 查询初始化状态并完成首次安装 |
 | `POST` | `/api/v1/auth/register` | 创建个人/企业账号、工作区与会话 |
 | `POST` | `/api/v1/auth/login` | 校验密码并创建持久会话 |

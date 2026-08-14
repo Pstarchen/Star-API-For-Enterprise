@@ -379,10 +379,31 @@ if ! "${compose[@]}" config --quiet; then
   echo "Target Compose configuration is invalid; restored STAR_API_VERSION=$current_version before any migration started." >&2
   exit 1
 fi
-echo "Starting Star-API $target_version and applying forward database migrations."
-if ! "${compose[@]}" up -d; then
-  echo "Compose failed while starting the target version." >&2
+echo "Applying forward database migrations while the current application remains online."
+if ! "${compose[@]}" run --rm --no-deps secrets-init; then
+  echo "Secret initialization failed before any running service was replaced." >&2
+  echo "The current application remains online. Backup: $backup_dir" >&2
+  exit 1
+fi
+if ! "${compose[@]}" run --rm --no-deps migrate; then
+  echo "Database migration failed before the running application was replaced." >&2
   echo "The environment remains pinned to $target_version because migrations may already have run." >&2
+  echo "Inspect logs with: docker compose --env-file '$env_file' -f '$compose_file' logs --tail=200 migrate app" >&2
+  echo "Backup: $backup_dir" >&2
+  exit 1
+fi
+
+echo "Recreating stateless services without restarting PostgreSQL or Redis."
+if ! "${compose[@]}" up -d --no-deps --wait --wait-timeout 90 php-runner; then
+  echo "PHP runner did not become healthy; the current web application remains online." >&2
+  "${compose[@]}" logs --tail=200 php-runner >&2 || true
+  echo "Backup: $backup_dir" >&2
+  exit 1
+fi
+if ! "${compose[@]}" up -d --no-deps app; then
+  echo "Compose failed while replacing the application container." >&2
+  echo "PostgreSQL, Redis, and the PHP runner remain online." >&2
+  echo "The environment remains pinned to $target_version because migrations have already run." >&2
   echo "Inspect logs with: docker compose --env-file '$env_file' -f '$compose_file' logs --tail=200 migrate app" >&2
   echo "Backup: $backup_dir" >&2
   exit 1

@@ -711,6 +711,34 @@ components:
   let latestSubscriptionResult;
   for (const product of [staticApi, textApi, datasetApi, mergedDatasetApi, genericDatasetApi, scalarDatasetApi, objectMapDatasetApi, portableDatasetApi, sniffedDatasetApi, zippedDatasetApi, openApiProduct, imageApi, videoApi, phpApi, builtinApi, digestApi, localApi, externalApi, redirectApi, tunnelApi, quickApi]) latestSubscriptionResult = await subscribe(personalCookie, appId, product.id, product.slug);
 
+  const datasetSubscription = latestSubscriptionResult.data.subscriptions.find((item) => item.productId === datasetApi.id);
+  const datasetEndpoint = datasetSubscription?.endpoints.find((item) => item.methods.includes("GET") || item.methods.includes("ALL"));
+  assert.ok(datasetSubscription && datasetEndpoint, "dataset subscription must expose a GET endpoint for direct links");
+  result = await jsonRequest("/api/v1/direct-links", { method: "POST", body: { subscriptionId: datasetSubscription.id, endpointId: datasetEndpoint.id, name: "Dataset direct link", defaultParameters: { name: "menu", type: "json" }, expiresInDays: 7 } });
+  expectStatus(result.response.status, 401, "anonymous direct-link creation rejected", result.body);
+  result = await jsonRequest("/api/v1/direct-links", { method: "POST", body: { subscriptionId: datasetSubscription.id, endpointId: datasetEndpoint.id, name: "Dataset direct link", defaultParameters: { name: "menu", type: "json" }, expiresInDays: 7 } }, personalCookie);
+  expectStatus(result.response.status, 201, "create scoped API direct link", result.body);
+  const directLinkId = result.body.data.directLinkId;
+  const directLinkPath = result.body.data.path;
+  assert.match(directLinkPath, /^\/l\/dl_[A-Za-z0-9_-]{32,}$/);
+  assert.equal(result.body.data.app.directLinks.find((item) => item.id === directLinkId)?.path, directLinkPath, "authorized application view must retain the copyable direct link");
+  response = await request(directLinkPath);
+  const directMenu = await response.json();
+  expectStatus(response.status, 200, "direct link returns raw API content", directMenu);
+  assert.deepEqual(directMenu.categories, ["notices", "quotes"]);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(response.headers.get("x-robots-tag"), "noindex, nofollow, noarchive");
+  assert.ok(response.headers.get("x-star-request-id"), "direct-link calls must pass through the public gateway");
+  response = await request(`${directLinkPath}?name=quotes&type=json`);
+  const directOverride = await response.json();
+  expectStatus(response.status, 200, "direct-link query overrides saved defaults", directOverride);
+  assert.ok(["quote-alpha", "quote-beta"].includes(directOverride.content));
+  result = await jsonRequest("/api/v1/direct-links", { method: "PATCH", body: { id: directLinkId } }, personalCookie);
+  expectStatus(result.response.status, 200, "revoke API direct link", result.body);
+  response = await request(directLinkPath);
+  expectStatus(response.status, 404, "revoked direct link rejected", await response.json());
+
   result = await jsonRequest("/api/v1/admin/subscriptions", {}, personalCookie);
   expectStatus(result.response.status, 403, "non-admin subscription policy access denied", result.body);
   result = await jsonRequest("/api/v1/admin/subscriptions", {}, adminCookie);

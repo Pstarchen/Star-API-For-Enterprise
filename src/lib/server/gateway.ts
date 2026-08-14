@@ -16,6 +16,34 @@ import { lockTenantBalance } from "@/lib/server/wallet-ledger";
 import { isContentHandler } from "@/lib/internal-handlers";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const endpointInclude = {
+  parameters: true,
+  responseRules: true,
+  version: { include: { product: { include: { upstream: { include: { nodes: true } }, accessGrants: true } } } },
+} satisfies Prisma.EndpointInclude;
+
+type GatewayEndpoint = Prisma.EndpointGetPayload<{ include: typeof endpointInclude }>;
+
+export type GatewayPrincipal = {
+  appId: string;
+  apiKeyId: string | null;
+  directLinkId: string | null;
+  scopes: string[];
+  app: {
+    id: string;
+    name: string;
+    tenantId: string;
+    environment: "TEST" | "PRODUCTION";
+    tenant: { id: string; balance: Prisma.Decimal };
+  };
+};
+
+type GatewayOptions = {
+  principal?: GatewayPrincipal;
+  endpointId?: string;
+  subscriptionId?: string;
+  defaultParameters?: Record<string, string>;
+};
 
 function jsonError(status: number, code: string, message: string, requestId: string, headers: HeadersInit = {}) {
   return Response.json({ code, message, requestId }, { status, headers: { "Cache-Control": "no-store", "X-Star-Request-Id": requestId, ...headers } });
@@ -160,32 +188,56 @@ async function applyResponseRules(response: Response, fields: string[]) {
   } catch { return response; }
 }
 
-export async function handlePublicGateway(request: Request, publicPath: string) {
+export async function handlePublicGateway(request: Request, publicPath: string, options: GatewayOptions = {}) {
   const startedAt = Date.now();
   const requestId = `req_${crypto.randomUUID().replaceAll("-", "").slice(0, 20)}`;
   const url = new URL(request.url);
   const requestedMethod = request.method === "OPTIONS" ? request.headers.get("access-control-request-method")?.toUpperCase() || "GET" : request.method.toUpperCase();
   const routeVersion = request.headers.get("x-api-version")?.trim() || url.searchParams.get("api_version")?.trim() || "";
-  const host = requestHost(request);
-  const candidates = await prisma.endpoint.findMany({
-    where: { publicHost: host, methods: { hasSome: [requestedMethod, "ALL"] }, version: { product: { status: { in: ["PUBLISHED", "GRAY"] } } } },
-    include: { parameters: true, responseRules: true, version: { include: { product: { include: { upstream: { include: { nodes: true } }, accessGrants: true } } } } },
-    orderBy: { routeVersion: "desc" },
-  });
-  const matched = candidates
-    .map((endpoint) => ({ endpoint, pathParams: routeMatch(endpoint.publicPath, publicPath) }))
-    .filter((item) => item.pathParams && (!routeVersion || item.endpoint.routeVersion === routeVersion))
-    .sort((left, right) => {
-      if (!routeVersion) {
-        const versionOrder = right.endpoint.routeVersion.localeCompare(left.endpoint.routeVersion, undefined, { numeric: true });
-        if (versionOrder) return versionOrder;
+  let resolvedPublicPath = publicPath;
+  let matched: { endpoint: GatewayEndpoint; pathParams: Record<string, string> | null } | undefined;
+  if (options.endpointId) {
+    const endpoint = await prisma.endpoint.findFirst({
+      where: { id: options.endpointId, methods: { hasSome: [requestedMethod, "ALL"] }, version: { product: { status: { in: ["PUBLISHED", "GRAY"] } } } },
+      include: endpointInclude,
+    });
+    if (endpoint) {
+      const pathParams: Record<string, string> = {};
+      for (const parameter of endpoint.parameters) {
+        const configured = options.defaultParameters?.[parameter.name];
+        if (parameter.location === "PATH") {
+          const requested = url.searchParams.get(parameter.name);
+          if (requested !== null || configured !== undefined) pathParams[parameter.name] = requested ?? configured!;
+          url.searchParams.delete(parameter.name);
+        } else if (parameter.location === "QUERY" && !url.searchParams.has(parameter.name) && configured !== undefined) {
+          url.searchParams.set(parameter.name, configured);
+        }
       }
-      const methodOrder = Number(right.endpoint.methods.includes(requestedMethod)) - Number(left.endpoint.methods.includes(requestedMethod));
-      if (methodOrder) return methodOrder;
-      const staticOrder = routeStaticSegmentCount(right.endpoint.publicPath) - routeStaticSegmentCount(left.endpoint.publicPath);
-      return staticOrder || right.endpoint.publicPath.length - left.endpoint.publicPath.length;
-    })[0];
-  if (!matched) return jsonError(404, "ROUTE_NOT_FOUND", "请求域名、路径、版本或方法未匹配到已发布路由", requestId);
+      resolvedPublicPath = populatedPath(endpoint.publicPath, pathParams);
+      matched = { endpoint, pathParams };
+    }
+  } else {
+    const host = requestHost(request);
+    const candidates = await prisma.endpoint.findMany({
+      where: { publicHost: host, methods: { hasSome: [requestedMethod, "ALL"] }, version: { product: { status: { in: ["PUBLISHED", "GRAY"] } } } },
+      include: endpointInclude,
+      orderBy: { routeVersion: "desc" },
+    });
+    matched = candidates
+      .map((endpoint) => ({ endpoint, pathParams: routeMatch(endpoint.publicPath, publicPath) }))
+      .filter((item) => item.pathParams && (!routeVersion || item.endpoint.routeVersion === routeVersion))
+      .sort((left, right) => {
+        if (!routeVersion) {
+          const versionOrder = right.endpoint.routeVersion.localeCompare(left.endpoint.routeVersion, undefined, { numeric: true });
+          if (versionOrder) return versionOrder;
+        }
+        const methodOrder = Number(right.endpoint.methods.includes(requestedMethod)) - Number(left.endpoint.methods.includes(requestedMethod));
+        if (methodOrder) return methodOrder;
+        const staticOrder = routeStaticSegmentCount(right.endpoint.publicPath) - routeStaticSegmentCount(left.endpoint.publicPath);
+        return staticOrder || right.endpoint.publicPath.length - left.endpoint.publicPath.length;
+      })[0];
+  }
+  if (!matched?.pathParams) return jsonError(404, "ROUTE_NOT_FOUND", "请求域名、路径、版本或方法未匹配到已发布路由", requestId);
   const { endpoint, pathParams } = matched;
   const product = endpoint.version.product;
   const upstream = product.upstream;
@@ -197,17 +249,23 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
   if (endpoint.ipDenylist.includes(ip) || (endpoint.ipAllowlist.length && !endpoint.ipAllowlist.includes(ip))) return jsonError(403, "IP_DENIED", "当前来源 IP 不在允许范围内", requestId);
   if (product.visibility === "INTERNAL" && request.headers.get("x-star-internal-secret") !== process.env.INTERNAL_GATEWAY_SECRET) return jsonError(404, "ROUTE_NOT_FOUND", "接口不存在", requestId);
 
-  const apiKey = await authenticateApiKey(bearerToken(request));
-  if (!apiKey) return jsonError(401, "INVALID_API_KEY", "API Key 无效、过期或已撤销", requestId);
-  if (apiKey.scopes.length && !apiKey.scopes.some((scope) => scope === "*" || scope === product.slug || scope === `api:${product.slug}`)) return jsonError(403, "SCOPE_DENIED", "API Key 未获得该接口的访问范围", requestId);
-  const granted = product.accessGrants.some((grant) => grant.tenantId === apiKey.app.tenantId);
+  let principal = options.principal;
+  if (!principal) {
+    const apiKey = await authenticateApiKey(bearerToken(request));
+    if (apiKey) principal = { appId: apiKey.appId, apiKeyId: apiKey.id, directLinkId: null, scopes: apiKey.scopes, app: apiKey.app };
+  }
+  if (!principal) return jsonError(401, "INVALID_API_KEY", "API Key 无效、过期或已撤销", requestId);
+  if (principal.scopes.length && !principal.scopes.some((scope) => scope === "*" || scope === product.slug || scope === `api:${product.slug}`)) return jsonError(403, "SCOPE_DENIED", "访问凭据未获得该接口的访问范围", requestId);
+  const granted = product.accessGrants.some((grant) => grant.tenantId === principal.app.tenantId);
   if (product.visibility === "PRIVATE" && !granted) return jsonError(403, "PRIVATE_API_DENIED", "当前企业未获得该私有接口授权", requestId);
-  if ((product.visibility === "GRAY" || product.status === "GRAY") && (apiKey.app.environment !== "TEST" || !granted)) return jsonError(403, "GRAY_API_DENIED", "该接口仅向已授权测试应用开放", requestId);
-  const subscription = await prisma.subscription.findUnique({ where: { appId_productId: { appId: apiKey.appId, productId: product.id } } });
+  if ((product.visibility === "GRAY" || product.status === "GRAY") && (principal.app.environment !== "TEST" || !granted)) return jsonError(403, "GRAY_API_DENIED", "该接口仅向已授权测试应用开放", requestId);
+  const subscription = options.subscriptionId
+    ? await prisma.subscription.findFirst({ where: { id: options.subscriptionId, appId: principal.appId, productId: product.id } })
+    : await prisma.subscription.findUnique({ where: { appId_productId: { appId: principal.appId, productId: product.id } } });
   if (!subscription || subscription.status !== "ACTIVE") return jsonError(403, "SUBSCRIPTION_REQUIRED", "应用尚未订阅该接口", requestId);
-  const successfulUsage = await prisma.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } });
+  const successfulUsage = await prisma.requestLog.count({ where: { appId: principal.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } });
   const chargeableOnSuccess = product.billingMode === "PER_REQUEST" && BigInt(successfulUsage) >= product.freeQuotaMonthly && subscription.unitPrice.gt(0);
-  if (chargeableOnSuccess && apiKey.app.tenant.balance.lt(subscription.unitPrice)) return jsonError(402, "INSUFFICIENT_BALANCE", "账户余额不足，请充值后重试", requestId);
+  if (chargeableOnSuccess && principal.app.tenant.balance.lt(subscription.unitPrice)) return jsonError(402, "INSUFFICIENT_BALANCE", "账户余额不足，请充值后重试", requestId);
   try {
     const limit = await consumeRateLimit(`starapi:qps:${subscription.id}:${Math.floor(Date.now() / 1000)}`, subscription.qpsLimit);
     if (!limit.allowed) return jsonError(429, "RATE_LIMITED", "请求频率超过订阅 QPS 限制", requestId, { "X-RateLimit-Remaining": "0" });
@@ -234,12 +292,13 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
   const reservation = await reserveGatewayUsage({
     requestId,
     subscriptionId: subscription.id,
-    appId: apiKey.appId,
-    apiKeyId: apiKey.id,
+    appId: principal.appId,
+    apiKeyId: principal.apiKeyId,
+    directLinkId: principal.directLinkId,
     productId: product.id,
     endpointId: endpoint.id,
     method: request.method,
-    publicPath,
+    publicPath: resolvedPublicPath,
     region: request.headers.get("x-star-region")?.slice(0, 48) || "default",
   });
   if (!reservation.allowed) {
@@ -260,7 +319,7 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
       response = content.response; responseBytes = content.responseBytes; statusCode = response.status;
     } else if (upstream.type === "PHP_PACKAGE") {
       const config = product.executionConfig && typeof product.executionConfig === "object" && !Array.isArray(product.executionConfig) ? product.executionConfig as Record<string, unknown> : {};
-      const runtime = await executePhpPackage({ productId: product.id, entryFile: typeof config.entryFile === "string" ? config.entryFile : "index.php", request, relativePath: publicPath, body, timeoutMs: upstream.timeoutMs });
+      const runtime = await executePhpPackage({ productId: product.id, entryFile: typeof config.entryFile === "string" ? config.entryFile : "index.php", request, relativePath: resolvedPublicPath, body, timeoutMs: upstream.timeoutMs });
       response = runtime.response; responseBytes = BigInt(runtime.responseBytes); statusCode = response.status; errorCode = runtime.runtimeError;
     } else if (upstream.type === "BUILTIN") {
       const fallbackBody = body?.byteLength ? { value: new TextDecoder().decode(body), text: new TextDecoder().decode(body) } : null;
@@ -274,7 +333,7 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
       const available = enabled.filter((node) => node.healthStatus !== "UNHEALTHY");
       const node = chooseUpstreamNode(available.length ? available : enabled);
       selectedNodeId = node.id;
-      const sourcePath = upstreamRequestPath(product.executionConfig, endpoint.path, publicPath, pathParams!);
+      const sourcePath = upstreamRequestPath(product.executionConfig, endpoint.path, resolvedPublicPath, pathParams);
       const targetPath = rewriteUpstreamPath(sourcePath, upstream.rewriteMode, upstream.upstreamPrefix);
       const result = await forwardRequest({ baseUrl: node.baseUrl, relativePath: targetPath, method: request.method, query: mappedInput.query ? `?${mappedInput.query}` : "", body: mappedInput.body, contentType: request.headers.get("content-type"), timeoutMs: upstream.timeoutMs, authType: upstream.authType, secrets: decryptJson(upstream.secretConfigEncrypted), kind: upstream.type, requestId });
       statusCode = result.response.status; responseBytes = BigInt(result.body.byteLength);
@@ -303,10 +362,10 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
     let charged = false;
     const amount = subscription.unitPrice;
     if (metered) {
-      const tenant = await lockTenantBalance(transaction, apiKey.app.tenantId);
+      const tenant = await lockTenantBalance(transaction, principal.app.tenantId);
       if (!tenant) throw new Error("TENANT_NOT_FOUND");
       previousBalance = tenant.balance;
-      const successfulBefore = await transaction.requestLog.count({ where: { appId: apiKey.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } });
+      const successfulBefore = await transaction.requestLog.count({ where: { appId: principal.appId, productId: product.id, occurredAt: { gte: monthStart() }, statusCode: { gte: 200, lt: 400 } } });
       chargeable = BigInt(successfulBefore) >= product.freeQuotaMonthly;
       if (chargeable && tenant.balance.gte(amount)) {
         currentBalance = tenant.balance.sub(amount);
@@ -317,15 +376,15 @@ export async function handlePublicGateway(request: Request, publicPath: string) 
     const finalStatus = chargeable && !charged ? 402 : statusCode;
     const finalError = finalStatus === 402 ? "INSUFFICIENT_BALANCE" : errorCode;
     const log = await transaction.requestLog.update({ where: { id: requestId }, data: { statusCode: finalStatus, latencyMs: Date.now() - startedAt, billableUnits: finalStatus === 402 ? BigInt(0) : billableUnits, amount: charged ? amount : new Prisma.Decimal(0), responseBytes: finalStatus === 402 ? BigInt(0) : responseBytes, errorCode: finalError, billed: charged } });
-    if (charged && currentBalance) await transaction.walletEntry.create({ data: { tenantId: apiKey.app.tenantId, requestLogId: log.id, type: "API_USAGE", delta: amount.negated(), balanceAfter: currentBalance, reason: `${product.name} API 调用` } });
+    if (charged && currentBalance) await transaction.walletEntry.create({ data: { tenantId: principal.app.tenantId, requestLogId: log.id, type: "API_USAGE", delta: amount.negated(), balanceAfter: currentBalance, reason: `${product.name} API 调用` } });
     return { insufficient: finalStatus === 402, previousBalance, currentBalance, chargedAmount: charged ? amount : new Prisma.Decimal(0) };
   });
   if (usage.insufficient) {
     response = jsonError(402, "INSUFFICIENT_BALANCE", "账户余额不足，请充值后重试", requestId);
     statusCode = 402;
   }
-  if (usage.previousBalance && usage.currentBalance) queueLowBalanceAlert({ tenantId: apiKey.app.tenantId, dedupeKey: requestId, previousBalance: usage.previousBalance.toString(), currentBalance: usage.currentBalance.toString() });
-  queueQuotaAlert({ tenantId: apiKey.app.tenantId, subscriptionId: subscription.id, appId: apiKey.appId, appName: apiKey.app.name, usedBefore: reservation.monthly.usedBefore, usedAfter: reservation.monthly.usedAfter, quota: subscription.quotaMonthly, period: monthPeriod() });
+  if (usage.previousBalance && usage.currentBalance) queueLowBalanceAlert({ tenantId: principal.app.tenantId, dedupeKey: requestId, previousBalance: usage.previousBalance.toString(), currentBalance: usage.currentBalance.toString() });
+  queueQuotaAlert({ tenantId: principal.app.tenantId, subscriptionId: subscription.id, appId: principal.appId, appName: principal.app.name, usedBefore: reservation.monthly.usedBefore, usedAfter: reservation.monthly.usedAfter, quota: subscription.quotaMonthly, period: monthPeriod() });
   response.headers.set("Cache-Control", "no-store");
   response.headers.set("X-Star-Request-Id", requestId);
   response.headers.set("X-Billable-Units", usage.insufficient ? "0" : billableUnits.toString());

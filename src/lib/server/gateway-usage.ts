@@ -7,7 +7,8 @@ type ReservationInput = {
   requestId: string;
   subscriptionId: string;
   appId: string;
-  apiKeyId: string;
+  apiKeyId: string | null;
+  directLinkId: string | null;
   productId: string;
   endpointId: string;
   method: string;
@@ -100,6 +101,7 @@ export async function reserveGatewayUsage(input: ReservationInput) {
         id: input.requestId,
         appId: input.appId,
         apiKeyId: input.apiKeyId,
+        directLinkId: input.directLinkId,
         productId: input.productId,
         endpointId: input.endpointId,
         method: input.method,

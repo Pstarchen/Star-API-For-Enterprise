@@ -155,6 +155,12 @@ assert.equal(readFileSync(join(project, ".env.production"), "utf8").match(/^STAR
 const updateCommands = readFileSync(log, "utf8");
 assert.equal((updateCommands.match(/^timeout 1800 docker pull /gm) ?? []).length, 3);
 assert.equal((updateCommands.match(/^image inspect /gm) ?? []).length, 6);
+assert.match(updateCommands, /compose .* run --rm --no-deps secrets-init/);
+assert.match(updateCommands, /compose .* run --rm --no-deps migrate/);
+assert.match(updateCommands, /compose .* up -d --no-deps --wait --wait-timeout 90 php-runner/);
+assert.match(updateCommands, /compose .* up -d --no-deps app/);
+assert.doesNotMatch(updateCommands, /compose .* up -d$/m, "Updates must not recreate the database and cache with a broad Compose up");
+assert.ok(updateCommands.indexOf("run --rm --no-deps migrate") < updateCommands.indexOf("up -d --no-deps app"), "Migrations must finish before replacing the web application");
 
 writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\n");
 writeFileSync(log, "");
