@@ -10,6 +10,7 @@ import { assetErrorMessage, inferPreparedDatasetContract, MAX_TOTAL_ASSET_BYTES,
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { getPlatformConfig } from "@/lib/server/installation";
+import { phpPackageMaxBytes } from "@/lib/platform";
 import { removeStoredMedia } from "@/lib/server/media-storage";
 import { findRouteConflict, findSlugConflict } from "@/lib/server/api-routing";
 import { prisma } from "@/lib/server/prisma";
@@ -131,7 +132,9 @@ async function generatedSlug(name: string) {
 
 async function requestInput(request: Request) {
   if (!request.headers.get("content-type")?.includes("multipart/form-data")) throw new Error("MULTIPART_REQUIRED");
-  const form = await readLimitedFormData(request, MAX_TOTAL_ASSET_BYTES + 6 * 1024 * 1024);
+  const platform = await getPlatformConfig();
+  const bodyLimit = Math.max(MAX_TOTAL_ASSET_BYTES, phpPackageMaxBytes(platform.phpPackageMaxMb)) + 6 * 1024 * 1024;
+  const form = await readLimitedFormData(request, bodyLimit);
   const raw = form.get("config");
   const decoded = typeof raw === "string" ? JSON.parse(raw) : null;
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("INVALID_CONFIG");
@@ -139,7 +142,6 @@ async function requestInput(request: Request) {
   const name = typeof supplied.name === "string" ? supplied.name.trim() : "";
   const hasExplicitSlug = typeof supplied.slug === "string" && supplied.slug.trim().length > 0;
   const slug = hasExplicitSlug ? String(supplied.slug).trim() : await generatedSlug(name);
-  const platform = await getPlatformConfig();
   const publicPath = normalizePublicPath(typeof supplied.publicPath === "string" && supplied.publicPath.trim() ? supplied.publicPath : `/api/${slug}`);
   const config = {
     publicHost: publicHostFromUrl(platform.publicUrl, process.env.API_PUBLIC_HOST ?? "localhost"),
@@ -160,7 +162,7 @@ async function requestInput(request: Request) {
   };
   const parsed = createSchema.safeParse(config);
   const files = form.getAll("assets").filter((item): item is File => item instanceof File && item.size > 0);
-  return { parsed, files };
+  return { parsed, files, platform };
 }
 
 export async function POST(request: Request) {
@@ -192,14 +194,14 @@ export async function POST(request: Request) {
   try {
     if (handler && handler !== "content.random-video" && (handler !== "content.random-image" || payload.files.length)) assets = await prepareApiAssets(handler, { files: payload.files, content: input.content });
     if (input.sourceType === "PHP_PACKAGE") {
-      const prepared = await preparePhpPackage(payload.files[0], phpEntryFile);
+      const prepared = await preparePhpPackage(payload.files[0], phpEntryFile, phpPackageMaxBytes(payload.platform.phpPackageMaxMb));
       assets = prepared.assets;
       phpEntryFile = prepared.entryFile;
     }
   }
   catch (error) { return Response.json({ code: 400, message: assetErrorMessage(error) ?? "上传内容无法处理" }, { status: 400, headers: noStoreHeaders }); }
 
-  const platform = await getPlatformConfig();
+  const platform = payload.platform;
   const category = await requireEnabledApiCategory(input.categoryId);
   if (!category) return Response.json({ code: 400, message: "所选 API 分类不存在或已停用" }, { status: 400, headers: noStoreHeaders });
   const providerName = input.providerName || platform.name;

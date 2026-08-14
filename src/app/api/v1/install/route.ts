@@ -57,7 +57,7 @@ export async function POST(request: Request) {
       await transaction.platformSetting.create({
         data: {
           key: PLATFORM_SETTING_KEY,
-          value: { name: platformName, description: platformDescription, publicUrl, icpNumber: "", publicSecurityNumber: "", hasCustomIcon: Boolean(icon), hasCustomHero: false, installedAt: new Date().toISOString(), version: 1 },
+          value: { name: platformName, description: platformDescription, publicUrl, icpNumber: "", publicSecurityNumber: "", hasCustomIcon: Boolean(icon), hasCustomHero: false, phpPackageMaxMb: 16, installedAt: new Date().toISOString(), version: 1 },
         },
       });
       await transaction.platformSetting.create({

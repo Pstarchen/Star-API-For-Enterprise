@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -13,6 +13,7 @@
     "test:image-signature": "node --experimental-strip-types scripts/test-image-signature.mjs",
     "test:docs": "node --experimental-strip-types scripts/test-docs-curl.mjs",
     "test:php-package": "node --experimental-strip-types scripts/test-php-package.mjs",
+    "test:timezone": "node --experimental-strip-types scripts/test-timezone.mjs",
     "test:upstream": "node --experimental-strip-types scripts/test-upstream.mjs",
     "test:epay": "node --experimental-strip-types scripts/test-epay.mjs",
     "test:e2e:epay": "node --experimental-strip-types scripts/e2e-epay.mjs",

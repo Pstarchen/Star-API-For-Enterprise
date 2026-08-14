@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Activity, ArrowRight, BadgeCheck, Boxes, Building2, CircleDollarSign, Landmark, Server, ShieldCheck, Users } from "lucide-react";
 import { connection } from "next/server";
+import { LocalTime } from "@/components/local-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -38,15 +39,15 @@ export default async function AdminPage() {
   const taskCount = pendingPayments.length + pendingProviders.length + pendingApis.length;
 
   return <div className="page-shell space-y-5">
-    <header className="ops-heading"><div><p className="eyebrow">PLATFORM OPERATIONS</p><h2>平台运营概览</h2><p>{now.toLocaleDateString("zh-CN", { year: "numeric", month: "long", day: "numeric", weekday: "long" })} · 实时业务数据</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="secondary" size="sm"><Link href="/admin/apis"><Boxes />管理 API</Link></Button><Button asChild size="sm"><Link href="/admin/payments"><Landmark />核销订单</Link></Button></div></header>
+    <header className="ops-heading"><div><p className="eyebrow">PLATFORM OPERATIONS</p><h2>平台运营概览</h2><p><LocalTime value={now} dateOnly options={{ year: "numeric", month: "long", day: "numeric", weekday: "long" }} /> · 实时业务数据</p></div><div className="flex flex-wrap gap-2"><Button asChild variant="secondary" size="sm"><Link href="/admin/apis"><Boxes />管理 API</Link></Button><Button asChild size="sm"><Link href="/admin/payments"><Landmark />核销订单</Link></Button></div></header>
 
     <section className="ops-scoreboard" aria-label="平台核心指标">{metrics.map((item) => <OpsMetric key={item.label} {...item} />)}</section>
 
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.45fr)_340px]">
       <section className="ops-queue"><header><div><span className="eyebrow">ACTION QUEUE</span><h3>运营待办</h3><p>按进入时间整理需要管理员介入的真实事项</p></div><Badge variant={taskCount ? "accent" : "success"}>{taskCount} 项</Badge></header><div className="ops-task-list">
-        {pendingPayments.map((item) => <TaskRow key={item.id} href="/admin/payments" icon={Landmark} tone="warning" title={`核对 ¥${item.amount.toString()} 对公转账`} detail={`${item.tenant.name} · ${item.invoice?.period ?? "未关联账期"} · ${item.createdAt.toLocaleString("zh-CN")}`} action="核销" />)}
+        {pendingPayments.map((item) => <TaskRow key={item.id} href="/admin/payments" icon={Landmark} tone="warning" title={`核对 ¥${item.amount.toString()} 对公转账`} detail={<>{item.tenant.name} · {item.invoice?.period ?? "未关联账期"} · <LocalTime value={item.createdAt} /></>} action="核销" />)}
         {pendingProviders.map((item) => <TaskRow key={item.id} href="/admin/providers" icon={BadgeCheck} tone="aqua" title={`审核服务商：${item.name}`} detail={`${item.legalName} · ${item.contactEmail}`} action="审核" />)}
-        {pendingApis.map((item) => <TaskRow key={item.id} href="/admin/apis" icon={Boxes} tone="brand" title={item.name} detail={`${item.provider.name} · ${item.status === "DRAFT" ? "草稿" : "审核中"} · ${item.updatedAt.toLocaleString("zh-CN")}`} action="处理" />)}
+        {pendingApis.map((item) => <TaskRow key={item.id} href="/admin/apis" icon={Boxes} tone="brand" title={item.name} detail={<>{item.provider.name} · {item.status === "DRAFT" ? "草稿" : "审核中"} · <LocalTime value={item.updatedAt} /></>} action="处理" />)}
         {!taskCount && <EmptyState icon={ShieldCheck} title="当前没有运营待办" description="新的审核或核销事项会自动进入这里。" />}
       </div></section>
 
@@ -59,6 +60,6 @@ export default async function AdminPage() {
 }
 
 function OpsMetric({ label, value, note, icon: Icon, tone }: { label: string; value: string; note: string; icon: typeof Server; tone: "brand" | "aqua" | "accent" | "warning" }) { return <div className={`ops-metric tone-${tone}`}><div><span>{label}</span><strong>{value}</strong><small>{note}</small></div><Icon /></div>; }
-function TaskRow({ href, icon: Icon, tone, title, detail, action }: { href: string; icon: typeof Boxes; tone: "brand" | "aqua" | "warning"; title: string; detail: string; action: string }) { return <div className={`ops-task tone-${tone}`}><span><Icon /></span><div><strong>{title}</strong><small>{detail}</small></div><Link href={href}>{action}<ArrowRight /></Link></div>; }
+function TaskRow({ href, icon: Icon, tone, title, detail, action }: { href: string; icon: typeof Boxes; tone: "brand" | "aqua" | "warning"; title: string; detail: React.ReactNode; action: string }) { return <div className={`ops-task tone-${tone}`}><span><Icon /></span><div><strong>{title}</strong><small>{detail}</small></div><Link href={href}>{action}<ArrowRight /></Link></div>; }
 function Signal({ label, value, alert = false }: { label: string; value: string; alert?: boolean }) { return <div><span>{label}</span><strong className={alert ? "text-[var(--danger)]" : ""}>{value}</strong></div>; }
 function GovernanceRow({ icon: Icon, label, value, href }: { icon: typeof BadgeCheck; label: string; value: string; href: string }) { return <Link href={href}><Icon /><span>{label}</span><strong>{value}</strong><ArrowRight /></Link>; }

@@ -15,5 +15,5 @@ export default async function ProviderApisPage() {
   if (!workspace || workspace.tenant.type !== "ENTERPRISE" || !["OWNER", "ADMIN"].includes(workspace.role)) redirect("/console?error=provider-role-required");
   const provider = await prisma.provider.findFirst({ where: { ownerTenantId: workspace.tenantId }, select: { id: true } });
   const [apis, platform, categories] = await Promise.all([provider ? listCatalogProducts({ providerId: provider.id }) : [], getPlatformConfig(), listApiCategories()]);
-  return <AdminApiManager initialApis={apis} initialCategories={categories} defaultPublicHost={publicHostFromUrl(platform.publicUrl)} defaultPublicUrl={platform.publicUrl} canPublish={false} />;
+  return <AdminApiManager initialApis={apis} initialCategories={categories} defaultPublicHost={publicHostFromUrl(platform.publicUrl)} defaultPublicUrl={platform.publicUrl} phpPackageMaxMb={platform.phpPackageMaxMb} canPublish={false} />;
 }

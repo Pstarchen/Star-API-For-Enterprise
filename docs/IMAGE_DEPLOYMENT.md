@@ -70,7 +70,7 @@ PostgreSQL、Redis、PHP Runner 均不暴露端口；应用发布到宿主机所
 - Nginx：`deploy/nginx/star-api.conf.example`
 - Caddy：`deploy/caddy/Caddyfile.example`
 
-替换模板内的 `example.com` 和证书路径。Nginx 模板已关闭请求及响应缓冲，并按路由限制请求体：媒体流入口 2100 MB、API 内容与站点图片管理入口 72 MB、其他入口 3 MB。这样既支持图片、压缩包、视频 Range 响应，也能阻止无限请求占满代理磁盘或应用内存。调整 `MEDIA_MAX_FILE_GB` 或 `MEDIA_MAX_ARCHIVE_GB` 时，应同步调整媒体上传 location 中的 `client_max_body_size`。
+替换模板内的 `example.com` 和证书路径。Nginx 模板已关闭请求及响应缓冲，并按路由限制请求体：媒体流入口 2100 MB、API 内容与站点图片管理入口 1030 MB（覆盖后台可配置的 1024 MB PHP ZIP 上限及表单开销）、其他入口 3 MB。这样既支持图片、压缩包、视频 Range 响应，也能阻止无限请求占满代理磁盘或应用内存。调整 `MEDIA_MAX_FILE_GB` 或 `MEDIA_MAX_ARCHIVE_GB` 时，应同步调整媒体上传 location 中的 `client_max_body_size`。
 
 反向代理必须传递原始 `Host`、`X-Forwarded-Host`、`X-Forwarded-Proto` 和客户端 IP。最终访问地址为：
 

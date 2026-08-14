@@ -1,10 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { revalidatePath } from "next/cache";
 import { generateResponseExample } from "@/lib/api-contracts";
+import { phpPackageMaxBytes } from "@/lib/platform";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
 import { assetErrorMessage, inferPreparedDatasetContract, MAX_TOTAL_ASSET_BYTES, prepareApiAssets, preparedContentResponseExample, preparePhpPackage } from "@/lib/server/api-assets";
 import { lockApiProduct } from "@/lib/server/api-product-lock";
 import { isAssetBackedHandler, isContentHandler, phpHandlerId } from "@/lib/internal-handlers";
+import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, readLimitedFormData, requestIp } from "@/lib/server/request";
 import { removeStoredMedia } from "@/lib/server/media-storage";
@@ -48,7 +50,9 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await admin();
   if ("error" in auth) return auth.error;
-  const form = await readLimitedFormData(request, MAX_TOTAL_ASSET_BYTES + 6 * 1024 * 1024).catch(() => null);
+  const platform = await getPlatformConfig();
+  const maximumPhpPackageBytes = phpPackageMaxBytes(platform.phpPackageMaxMb);
+  const form = await readLimitedFormData(request, Math.max(MAX_TOTAL_ASSET_BYTES, maximumPhpPackageBytes) + 6 * 1024 * 1024).catch(() => null);
   if (!form) return Response.json({ code: 400, message: "上传请求格式不正确" }, { status: 400, headers: noStoreHeaders });
   const productId = String(form.get("productId") ?? "");
   const content = String(form.get("content") ?? "");
@@ -63,7 +67,7 @@ export async function POST(request: Request) {
   let normalizedEntry = entryFile;
   try {
     if (product.internalHandler === phpHandlerId) {
-      const prepared = await preparePhpPackage(files[0], entryFile);
+      const prepared = await preparePhpPackage(files[0], entryFile, maximumPhpPackageBytes);
       assets = prepared.assets;
       normalizedEntry = prepared.entryFile;
     } else if (isContentHandler(product.internalHandler)) assets = await prepareApiAssets(product.internalHandler, { files, content });

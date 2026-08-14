@@ -183,10 +183,11 @@ async function main() {
   expectStatus(response.status, 200, "delete unused API category", await response.json());
 
   const heroDataUrl = `data:image/jpeg;base64,${readFileSync(new URL("../public/art/anime-operator.jpg", import.meta.url)).toString("base64")}`;
-  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "replace", iconDataUrl: `data:image/png;base64,${replacementIcon.toString("base64")}`, heroAction: "replace", heroDataUrl } }, adminCookie);
+  result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { name: "Star-API E2E", description: "Automated end-to-end verification environment.", publicUrl: portalUrl, icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", phpPackageMaxMb: 256, iconAction: "replace", iconDataUrl: `data:image/png;base64,${replacementIcon.toString("base64")}`, heroAction: "replace", heroDataUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "update hero and filing settings", result.body);
   assert.equal(result.body.data.hasCustomHero, true);
   assert.equal(result.body.data.hasCustomIcon, true);
+  assert.equal(result.body.data.phpPackageMaxMb, 256);
   response = await request("/");
   const replacedIconHrefs = pageIconHrefs(await response.text());
   assert.equal(replacedIconHrefs.length, 1, "the page must keep a single favicon after a settings update");
@@ -701,7 +702,7 @@ components:
   const portal = new URL(portalUrl);
   const alternateHost = portal.hostname === "localhost" ? "127.0.0.1" : "localhost";
   const alternatePublicUrl = `${portal.protocol}//${alternateHost}${portal.port ? `:${portal.port}` : ""}`;
-  const platformSettings = { name: "Star-API E2E", description: "Automated end-to-end verification environment.", icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", iconAction: "keep", heroAction: "keep" };
+  const platformSettings = { name: "Star-API E2E", description: "Automated end-to-end verification environment.", icpNumber: "Test ICP 2026", publicSecurityNumber: "Test Public Security 42000000000001", phpPackageMaxMb: 16, iconAction: "keep", heroAction: "keep" };
   result = await jsonRequest("/api/v1/admin/settings", { method: "PATCH", body: { ...platformSettings, publicUrl: alternatePublicUrl } }, adminCookie);
   expectStatus(result.response.status, 200, "changing public URL migrates API routes", result.body);
   result = await jsonRequest(`/api/v1/admin/apis/config?id=${encodeURIComponent(staticApi.id)}`, {}, adminCookie);

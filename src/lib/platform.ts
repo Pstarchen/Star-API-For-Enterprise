@@ -6,8 +6,27 @@ export type PlatformConfig = {
   publicSecurityNumber: string;
   hasCustomIcon: boolean;
   hasCustomHero: boolean;
+  phpPackageMaxMb: number;
   revision: string;
 };
+
+export const DEFAULT_PHP_PACKAGE_MAX_MB = 16;
+export const MIN_PHP_PACKAGE_MAX_MB = 1;
+export const MAX_PHP_PACKAGE_MAX_MB = 1024;
+
+export function normalizePhpPackageMaxMb(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value >= MIN_PHP_PACKAGE_MAX_MB && value <= MAX_PHP_PACKAGE_MAX_MB
+    ? value
+    : DEFAULT_PHP_PACKAGE_MAX_MB;
+}
+
+export function phpPackageMaxBytes(value: unknown) {
+  return normalizePhpPackageMaxMb(value) * 1024 * 1024;
+}
+
+export function phpPackageExpandedMaxBytes(value: unknown) {
+  return Math.max(32, normalizePhpPackageMaxMb(value)) * 1024 * 1024;
+}
 
 export const defaultPlatformConfig: PlatformConfig = {
   name: "Star-API",
@@ -17,6 +36,7 @@ export const defaultPlatformConfig: PlatformConfig = {
   publicSecurityNumber: "",
   hasCustomIcon: false,
   hasCustomHero: false,
+  phpPackageMaxMb: DEFAULT_PHP_PACKAGE_MAX_MB,
   revision: "default",
 };
 

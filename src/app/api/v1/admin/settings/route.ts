@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { methodsOverlap } from "@/lib/api-contracts";
 import { normalizePublicPath, publicHostFromUrl } from "@/lib/api-routes";
+import { MAX_PHP_PACKAGE_MAX_MB, MIN_PHP_PACKAGE_MAX_MB } from "@/lib/platform";
 import { getCurrentUser } from "@/lib/server/auth";
 import { parseHeroDataUrl, parseIconDataUrl } from "@/lib/server/branding";
 import { getPlatformConfig, PLATFORM_SETTING_KEY } from "@/lib/server/installation";
@@ -17,6 +18,7 @@ const settingsSchema = z.object({
     .transform((value) => value.replace(/\/+$/, "")),
   icpNumber: z.string().trim().max(80).default(""),
   publicSecurityNumber: z.string().trim().max(100).default(""),
+  phpPackageMaxMb: z.number().int().min(MIN_PHP_PACKAGE_MAX_MB).max(MAX_PHP_PACKAGE_MAX_MB),
   iconAction: z.enum(["keep", "replace", "remove"]),
   iconDataUrl: z.string().max(750_000).optional(),
   heroAction: z.enum(["keep", "replace", "remove"]),
@@ -152,6 +154,7 @@ export async function PATCH(request: Request) {
             publicUrl: parsed.data.publicUrl,
             icpNumber: parsed.data.icpNumber,
             publicSecurityNumber: parsed.data.publicSecurityNumber,
+            phpPackageMaxMb: parsed.data.phpPackageMaxMb,
             hasCustomIcon,
             hasCustomHero,
             version: typeof previous.version === "number" ? previous.version + 1 : 2,
@@ -170,6 +173,8 @@ export async function PATCH(request: Request) {
             name: parsed.data.name,
             previousPublicUrl,
             publicUrl: parsed.data.publicUrl,
+            previousPhpPackageMaxMb: typeof previous.phpPackageMaxMb === "number" ? previous.phpPackageMaxMb : 16,
+            phpPackageMaxMb: parsed.data.phpPackageMaxMb,
             migratedRouteCount,
             iconAction: parsed.data.iconAction,
             heroAction: parsed.data.heroAction,

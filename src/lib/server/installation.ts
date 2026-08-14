@@ -1,7 +1,7 @@
 import "server-only";
 
 import { prisma } from "@/lib/server/prisma";
-import { defaultPlatformConfig, type PlatformConfig } from "@/lib/platform";
+import { defaultPlatformConfig, normalizePhpPackageMaxMb, type PlatformConfig } from "@/lib/platform";
 
 export const PLATFORM_SETTING_KEY = "platform";
 
@@ -26,6 +26,7 @@ export async function getPlatformConfig(): Promise<PlatformConfig> {
     publicSecurityNumber: typeof value.publicSecurityNumber === "string" ? value.publicSecurityNumber : "",
     hasCustomIcon: value.hasCustomIcon === true,
     hasCustomHero: value.hasCustomHero === true,
+    phpPackageMaxMb: normalizePhpPackageMaxMb(value.phpPackageMaxMb),
     revision: setting.updatedAt.getTime().toString(36),
   };
 }

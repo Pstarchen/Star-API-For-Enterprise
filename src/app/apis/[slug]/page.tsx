@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, BadgeCheck, BookOpen, CircleGauge, Clock3, ExternalLink, KeyRound, ShieldCheck } from "lucide-react";
+import { LocalTime } from "@/components/local-time";
 import { PortalShell } from "@/components/portal-shell";
 import { RequestPlayground } from "@/components/request-playground";
 import { buildPublicApiUrl } from "@/lib/api-routes";
@@ -34,7 +35,7 @@ export default async function ApiDetailPage({ params }: PageProps<"/apis/[slug]"
       <div className="container-shell py-7">
         <Link href="/marketplace" className="inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]"><ArrowLeft className="size-3" />返回 API 市场</Link>
         <div className="mt-6 flex flex-col justify-between gap-5 lg:flex-row">
-          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{api.name}</h1>{api.verified && <BadgeCheck className="size-5 fill-[var(--brand)] text-white" />}<span className="rounded-[4px] bg-[var(--surface-subtle)] px-2 py-1 text-[9px]">{api.version ?? "未标记版本"}</span></div><p className="mt-2 max-w-2xl text-[13px] leading-6 text-[var(--muted)]">{api.description}</p><p className="mt-2 text-[10px] text-[var(--muted)]">由 <strong className="text-[var(--ink)]">{api.provider}</strong> 提供 · 更新于 {new Date(api.updatedAt).toLocaleDateString("zh-CN")}</p></div>
+          <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h1 className="text-2xl font-bold">{api.name}</h1>{api.verified && <BadgeCheck className="size-5 fill-[var(--brand)] text-white" />}<span className="rounded-[4px] bg-[var(--surface-subtle)] px-2 py-1 text-[9px]">{api.version ?? "未标记版本"}</span></div><p className="mt-2 max-w-2xl text-[13px] leading-6 text-[var(--muted)]">{api.description}</p><p className="mt-2 text-[10px] text-[var(--muted)]">由 <strong className="text-[var(--ink)]">{api.provider}</strong> 提供 · 更新于 <LocalTime value={api.updatedAt} dateOnly /></p></div>
           <div className="flex gap-2"><Link href="/console/apps" className="inline-flex h-10 items-center gap-2 rounded-[6px] border border-[var(--line)] px-4 text-[11px] font-semibold"><KeyRound className="size-3.5" />管理密钥</Link><a href="#debug" className="inline-flex h-10 items-center gap-2 rounded-[6px] bg-[var(--brand)] px-4 text-[11px] font-semibold text-white">真实调试 <ExternalLink className="size-3.5" /></a></div>
         </div>
         <div className="mt-7 grid grid-cols-2 gap-px overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--line)] sm:grid-cols-4"><Stat icon={CircleGauge} label="平均响应" value={api.latency == null ? "暂无数据" : `${api.latency} ms`} /><Stat icon={ShieldCheck} label="真实可用率" value={api.uptime == null ? "暂无数据" : `${api.uptime}%`} /><Stat icon={Clock3} label="默认限流" value={`${api.qpsLimit} QPS`} /><Stat icon={BookOpen} label="计费价格" value={api.price} /></div>

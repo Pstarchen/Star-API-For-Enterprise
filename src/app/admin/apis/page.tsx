@@ -8,5 +8,5 @@ import { connection } from "next/server";
 export default async function AdminApisPage() {
   await connection();
   const [apis, platform, categories] = await Promise.all([listCatalogProducts(), getPlatformConfig(), listApiCategories(true)]);
-  return <AdminApiManager initialApis={apis} initialCategories={categories} defaultPublicHost={publicHostFromUrl(platform.publicUrl)} defaultPublicUrl={platform.publicUrl} />;
+  return <AdminApiManager initialApis={apis} initialCategories={categories} defaultPublicHost={publicHostFromUrl(platform.publicUrl)} defaultPublicUrl={platform.publicUrl} phpPackageMaxMb={platform.phpPackageMaxMb} />;
 }

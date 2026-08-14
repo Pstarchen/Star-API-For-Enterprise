@@ -4,7 +4,7 @@ import { CheckCircle2, ImageIcon, Loader2, RotateCcw, Save, ShieldCheck, Trash2 
 import Image from "next/image";
 import { type FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { platformHeroUrl, platformIconUrl, type PlatformConfig } from "@/lib/platform";
+import { MAX_PHP_PACKAGE_MAX_MB, MIN_PHP_PACKAGE_MAX_MB, platformHeroUrl, platformIconUrl, type PlatformConfig } from "@/lib/platform";
 import { Button } from "./ui/button";
 import { FileUploadField } from "./ui/file-upload";
 import { Input } from "./ui/input";
@@ -63,7 +63,7 @@ export function PlatformSettingsForm({ config }: { config: PlatformConfig }) {
     setError("");
     const form = new FormData(event.currentTarget);
     try {
-      const response = await fetch("/api/v1/admin/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: form.get("name"), description: form.get("description"), publicUrl: form.get("publicUrl"), icpNumber: form.get("icpNumber"), publicSecurityNumber: form.get("publicSecurityNumber"), iconAction, iconDataUrl: iconAction === "replace" ? iconDataUrl : undefined, heroAction, heroDataUrl: heroAction === "replace" ? heroDataUrl : undefined }) });
+      const response = await fetch("/api/v1/admin/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: form.get("name"), description: form.get("description"), publicUrl: form.get("publicUrl"), icpNumber: form.get("icpNumber"), publicSecurityNumber: form.get("publicSecurityNumber"), phpPackageMaxMb: Number(form.get("phpPackageMaxMb")), iconAction, iconDataUrl: iconAction === "replace" ? iconDataUrl : undefined, heroAction, heroDataUrl: heroAction === "replace" ? heroDataUrl : undefined }) });
       const result = await response.json();
       if (!response.ok) { setError(result.message ?? "平台配置保存失败"); return; }
       const next = result.data as PlatformConfig;
@@ -101,6 +101,11 @@ export function PlatformSettingsForm({ config }: { config: PlatformConfig }) {
       <div className="relative aspect-[16/6] min-h-48 overflow-hidden rounded-[8px] border border-[var(--line)] bg-[var(--surface-subtle)]"><Image src={heroPreview} alt="门户首屏预览" fill unoptimized className="object-cover" sizes="(max-width: 1024px) 100vw, 960px" /><span className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[color-mix(in_srgb,var(--surface)_75%,transparent)]" /></div>
       <FileUploadField key={heroReset} name="siteHeroFile" accept="image/png,image/jpeg,image/webp" maxBytes={5 * 1024 * 1024} title="更换首屏图片" description="支持 PNG、JPEG、WebP，最大 5 MB；推荐尺寸不低于 1920 × 900" onFilesChange={(files) => selectAsset(files, "hero")} />
       <div className="flex flex-wrap gap-2">{config.hasCustomHero && <Button type="button" onClick={() => resetHero(true)} variant="outline" size="sm"><Trash2 />恢复默认图片</Button>}{heroAction !== "keep" && <Button type="button" onClick={() => resetHero(false)} variant="secondary" size="sm"><RotateCcw />撤销更改</Button>}</div>
+    </div></section>
+
+    <section className="panel overflow-hidden"><header className="border-b border-[var(--line)] px-5 py-4"><h3 className="text-[13px] font-bold">程序包上传</h3><p className="mt-1 text-[9px] text-[var(--muted)]">控制平台管理员部署 PHP 程序包时允许的 ZIP 大小。</p></header><div className="p-5 sm:max-w-sm">
+      <Field label="PHP ZIP 上限（MB）"><Input name="phpPackageMaxMb" required type="number" min={MIN_PHP_PACKAGE_MAX_MB} max={MAX_PHP_PACKAGE_MAX_MB} step={1} defaultValue={config.phpPackageMaxMb} /></Field>
+      <small className="mt-1.5 block text-[9px] leading-4 text-[var(--muted)]">可设置 {MIN_PHP_PACKAGE_MAX_MB}–{MAX_PHP_PACKAGE_MAX_MB} MB。较大的程序包会占用更多应用内存和数据库空间。</small>
     </div></section>
 
     {error && <p role="alert" className="rounded-[8px] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]">{error}</p>}

@@ -27,6 +27,7 @@ jobs:
       - run: npm run db:generate
       - run: npm run test:image-signature
       - run: npm run test:php-package
+      - run: npm run test:timezone
       - run: npm run test:upstream
       - run: npm run test:epay
       - run: npm run test:production-updater

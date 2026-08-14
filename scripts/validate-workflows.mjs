@@ -23,6 +23,7 @@ assert(Array.isArray(ciWorkflow?.jobs?.quality?.steps), "CI quality steps are mi
 const qualityCommands = ciWorkflow.jobs.quality.steps.map((step) => step.run).filter(Boolean);
 assert(qualityCommands.includes("npm run test:image-signature"), "CI must test tolerant image signature detection");
 assert(qualityCommands.includes("npm run test:php-package"), "CI must test PHP package entry discovery");
+assert(qualityCommands.includes("npm run test:timezone"), "CI must test user timezone handling");
 assert(qualityCommands.includes("npm run test:upstream"), "CI must test external upstream URL handling");
 assert(qualityCommands.includes("npm run test:system-update"), "CI must test host-local system updates");
 assert(qualityCommands.includes("npm run test:local-update-worker"), "CI must test the host-local update worker");

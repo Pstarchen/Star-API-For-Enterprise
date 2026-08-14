@@ -2,6 +2,15 @@ import assert from "node:assert/strict";
 import { unzipSync, zipSync, strToU8 } from "fflate";
 
 const { resolvePhpEntryFile } = await import("../src/lib/php-package.ts");
+const { normalizePhpPackageMaxMb, phpPackageExpandedMaxBytes, phpPackageMaxBytes } = await import("../src/lib/platform.ts");
+
+assert.equal(normalizePhpPackageMaxMb(undefined), 16);
+assert.equal(normalizePhpPackageMaxMb(256), 256);
+assert.equal(normalizePhpPackageMaxMb(0), 16);
+assert.equal(normalizePhpPackageMaxMb(1025), 16);
+assert.equal(phpPackageMaxBytes(1024), 1024 * 1024 * 1024);
+assert.equal(phpPackageExpandedMaxBytes(16), 32 * 1024 * 1024);
+assert.equal(phpPackageExpandedMaxBytes(256), 256 * 1024 * 1024);
 
 assert.equal(resolvePhpEntryFile(["project/index.php", "project/data/a.json"], ""), "project/index.php");
 assert.equal(resolvePhpEntryFile(["Project/Index.PHP", "Project/lib.php"], "index.php"), "Project/Index.PHP");

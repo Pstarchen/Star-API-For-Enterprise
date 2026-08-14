@@ -7,6 +7,7 @@ import { parseAllDocuments } from "yaml";
 import type { ApiDataType, ApiRequestParameter, ApiResponseParameter } from "@/lib/api-contracts";
 import type { ContentHandlerId } from "@/lib/internal-handlers";
 import { normalizePackagePath, resolvePhpEntryFile } from "@/lib/php-package";
+import { DEFAULT_PHP_PACKAGE_MAX_MB, phpPackageExpandedMaxBytes, phpPackageMaxBytes } from "@/lib/platform";
 import { detectImageSignature } from "@/lib/image-signature";
 import { prisma } from "@/lib/server/prisma";
 import { mediaResponseMimeType, storedMediaResponse } from "@/lib/server/media-storage";
@@ -18,8 +19,6 @@ export const MAX_DATASET_FILES = 200;
 export const MAX_DATASET_FILE_BYTES = 16 * 1024 * 1024;
 export const MAX_DATASET_ARCHIVE_BYTES = 16 * 1024 * 1024;
 export const MAX_TOTAL_ASSET_BYTES = 64 * 1024 * 1024;
-export const MAX_PHP_PACKAGE_BYTES = 16 * 1024 * 1024;
-export const MAX_PHP_EXTRACTED_BYTES = 32 * 1024 * 1024;
 
 export type PreparedAsset = { kind: "IMAGE" | "TEXT" | "JSON" | "DATASET" | "PHP_SOURCE"; name: string; groupKey: string; mimeType: string; data: Uint8Array<ArrayBuffer>; size: number };
 
@@ -60,9 +59,12 @@ function trustedImageMimeType(file: File, data: Uint8Array) {
   return byExtension[extension] ?? (Object.values(byExtension).includes(declared) ? declared : "application/octet-stream");
 }
 
-export async function preparePhpPackage(file: File | undefined, entryFile: string) {
+export async function preparePhpPackage(file: File | undefined, entryFile: string, maximumPackageBytes = phpPackageMaxBytes(DEFAULT_PHP_PACKAGE_MAX_MB)) {
+  const maximumExpandedBytes = Math.max(32 * 1024 * 1024, maximumPackageBytes);
+  const maximumPackageMb = Math.floor(maximumPackageBytes / 1024 / 1024);
+  const maximumExpandedMb = Math.floor(maximumExpandedBytes / 1024 / 1024);
   if (!file || file.size <= 0) throw new Error("PHP_PACKAGE_REQUIRED");
-  if (file.size > MAX_PHP_PACKAGE_BYTES) throw new Error("PHP_PACKAGE_TOO_LARGE");
+  if (file.size > maximumPackageBytes) throw new Error(`PHP_PACKAGE_TOO_LARGE:${maximumPackageMb}`);
   if (file.name.toLowerCase().endsWith(".php")) {
     const path = normalizePackagePath(file.name);
     const data = ownedBytes(await file.arrayBuffer());
@@ -82,12 +84,13 @@ export async function preparePhpPackage(file: File | undefined, entryFile: strin
         expandedBytes += entry.originalSize;
         if (expandedFiles > 200) throw new Error("INVALID_PACKAGE_FILE_COUNT");
         if (entry.originalSize > MAX_IMAGE_BYTES) throw new Error("PACKAGE_FILE_TOO_LARGE");
-        if (expandedBytes > MAX_PHP_EXTRACTED_BYTES) throw new Error("PHP_EXTRACTED_TOO_LARGE");
+        if (expandedBytes > maximumExpandedBytes) throw new Error(`PHP_EXTRACTED_TOO_LARGE:${maximumExpandedMb}`);
         return true;
       },
     });
   } catch (error) {
-    if (error instanceof Error && ["INVALID_PACKAGE_PATH", "INVALID_PACKAGE_FILE_COUNT", "PACKAGE_FILE_TOO_LARGE", "PHP_EXTRACTED_TOO_LARGE"].includes(error.message)) throw error;
+    const code = error instanceof Error ? error.message.split(":", 1)[0] : "";
+    if (["INVALID_PACKAGE_PATH", "INVALID_PACKAGE_FILE_COUNT", "PACKAGE_FILE_TOO_LARGE", "PHP_EXTRACTED_TOO_LARGE"].includes(code)) throw error;
     throw new Error("INVALID_ZIP");
   }
   const files = Object.entries(unpacked).filter(([name]) => !name.endsWith("/"));
@@ -102,7 +105,7 @@ export async function preparePhpPackage(file: File | undefined, entryFile: strin
     return { kind: "PHP_SOURCE" as const, name: path, groupKey: "", mimeType: "application/octet-stream", data: ownedArray(bytes), size: bytes.byteLength };
   });
   const entry = resolvePhpEntryFile(prepared.map((item) => item.name), entryFile);
-  if (prepared.reduce((sum, item) => sum + item.size, 0) > MAX_PHP_EXTRACTED_BYTES) throw new Error("PHP_EXTRACTED_TOO_LARGE");
+  if (prepared.reduce((sum, item) => sum + item.size, 0) > maximumExpandedBytes) throw new Error(`PHP_EXTRACTED_TOO_LARGE:${maximumExpandedMb}`);
   return { entryFile: entry, assets: prepared };
 }
 
@@ -385,7 +388,7 @@ export function assetErrorMessage(error: unknown) {
     ASSETS_TOO_LARGE: `单次内容总大小不能超过 ${MAX_TOTAL_ASSET_BYTES / 1024 / 1024} MB`,
     ASSETS_REQUIRED: "请添加至少一项可返回的内容",
     PHP_PACKAGE_REQUIRED: "请选择包含 PHP 源码和附属文件的 ZIP 包",
-    PHP_PACKAGE_TOO_LARGE: `PHP ZIP 包不能超过 ${MAX_PHP_PACKAGE_BYTES / 1024 / 1024} MB`,
+    PHP_PACKAGE_TOO_LARGE: `PHP ZIP 包不能超过 ${Number(error.message.split(":")[1]) || DEFAULT_PHP_PACKAGE_MAX_MB} MB`,
     INVALID_PACKAGE_PATH: "ZIP 中包含不安全的文件路径",
     DUPLICATE_PACKAGE_PATH: "ZIP 中包含重复或仅大小写不同的文件路径",
     INVALID_PHP_ENTRY: "入口文件必须是 PHP 文件",
@@ -394,7 +397,7 @@ export function assetErrorMessage(error: unknown) {
     PACKAGE_FILE_TOO_LARGE: `程序包内单个文件不能超过 ${MAX_IMAGE_BYTES / 1024 / 1024} MB`,
     PHP_ENTRY_NOT_FOUND: error.message.includes(":") ? `ZIP 中没有找到指定入口：${error.message.split(":").slice(1).join(":")}` : "ZIP 中没有找到 PHP 文件，请确认程序包包含可执行的 .php 源文件",
     PHP_ENTRY_AMBIGUOUS: `ZIP 中存在多个可能的 PHP 入口，请填写完整相对路径：${error.message.split(":").slice(1).join(":").split("|").join("、")}`,
-    PHP_EXTRACTED_TOO_LARGE: `PHP 程序包解压后不能超过 ${MAX_PHP_EXTRACTED_BYTES / 1024 / 1024} MB`,
+    PHP_EXTRACTED_TOO_LARGE: `PHP 程序包解压后不能超过 ${Number(error.message.split(":")[1]) || phpPackageExpandedMaxBytes(DEFAULT_PHP_PACKAGE_MAX_MB) / 1024 / 1024} MB`,
   };
   return messages[errorCode] ?? null;
 }
