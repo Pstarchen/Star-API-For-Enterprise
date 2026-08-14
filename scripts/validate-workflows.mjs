@@ -14,6 +14,7 @@ function assert(condition, message) {
 assert(workflow?.name === "Deploy production", "Unexpected production workflow name");
 assert(workflow?.on?.workflow_dispatch, "Production workflow must be manually dispatched");
 assert(workflow?.permissions?.contents === "read", "Production workflow must only request read access to repository contents");
+assert(workflow?.permissions?.packages === "read", "Production workflow must only read release packages");
 assert(workflow?.jobs?.deploy?.environment === "production", "Production workflow must use the protected production environment");
 assert(workflow?.jobs?.deploy?.concurrency == null, "Concurrency must be defined at workflow scope");
 assert(Array.isArray(workflow?.jobs?.deploy?.steps), "Production deployment steps are missing");
@@ -30,6 +31,11 @@ assert(checkout?.with?.["fetch-depth"] === 0, "Production checkout must fetch re
 
 const scripts = workflow.jobs.deploy.steps.filter((step) => typeof step.run === "string");
 assert(scripts.length >= 5, "Expected production validation, deployment, health and cleanup scripts");
+
+const deployScript = workflow.jobs.deploy.steps.find((step) => step.name === "Inspect and update production")?.run ?? "";
+assert(deployScript.includes('docker pull --platform "$remote_platform"'), "Production deploy must pull the matching image architecture on the runner");
+assert(deployScript.includes('docker save "${release_images[@]}"'), "Production deploy must export release images from the runner");
+assert(deployScript.includes('timeout 45m ssh "${ssh_options[@]}" "$SSH_USER@$SSH_HOST" docker load'), "Production deploy must stream release images over verified SSH");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {
