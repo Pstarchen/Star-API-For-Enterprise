@@ -47,6 +47,8 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --chown=nextjs:nodejs scripts/show-install-token.mjs ./scripts/show-install-token.mjs
+COPY package.json compose.production.yml .env.production.example /opt/star-api-release/
+COPY --chmod=755 scripts/update-production.sh scripts/production.sh scripts/process-local-update.sh /opt/star-api-release/scripts/
 COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/star-api-entrypoint
 COPY --chmod=755 scripts/init-deployment-secrets.sh /usr/local/bin/star-api-init-secrets
 

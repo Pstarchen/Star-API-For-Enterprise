@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -16,6 +16,8 @@
     "test:epay": "node --experimental-strip-types scripts/test-epay.mjs",
     "test:e2e:epay": "node --experimental-strip-types scripts/e2e-epay.mjs",
     "test:production-updater": "node scripts/test-production-updater.mjs",
+    "test:local-update-worker": "node scripts/test-local-update-worker.mjs",
+    "test:system-update": "node --experimental-strip-types scripts/test-system-update.mjs",
     "test:workflows": "node scripts/validate-workflows.mjs",
     "test:stress": "node scripts/stress-e2e.mjs",
     "install:token": "node scripts/show-install-token-docker.mjs",
@@ -25,6 +27,7 @@
     "production:update": "bash scripts/production.sh update",
     "production:token": "bash scripts/production.sh token",
     "production:enable-updates": "bash scripts/production.sh enable-updates",
+    "production:enable-github-updates": "bash scripts/production.sh enable-github-updates",
     "production:status": "bash scripts/production.sh status",
     "production:logs": "bash scripts/production.sh logs",
     "deploy:baota:init": "bash deploy/baota/init-environment.sh",

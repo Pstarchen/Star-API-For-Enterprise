@@ -18,7 +18,9 @@ Commands:
   check         Check whether a newer stable image is available.
   token         Print the first-install token from the running app container.
   enable-updates
-                Store a GitHub Actions token in the secrets volume and enable admin UI updates.
+                Enable host-local admin UI updates with a systemd path service.
+  enable-github-updates
+                Store a GitHub Actions token for compatibility fallback updates.
   status        Show production container status.
   logs          Follow recent app, migrator, postgres, redis, and php-runner logs.
 
@@ -71,6 +73,91 @@ set_env_value() {
   mv "$temp_file" "$env_file"
 }
 
+env_value() {
+  local key="$1"
+  sed -n "s/^${key}=//p" "$env_file" | tail -n 1 | tr -d '\r'
+}
+
+local_update_state_dir() {
+  local configured
+  configured="$(env_value STAR_API_UPDATE_STATE_DIR)"
+  configured="${configured:-$project_dir/.star-api-update}"
+  if [[ "$configured" == /* ]]; then
+    printf '%s\n' "$configured"
+  else
+    printf '%s\n' "$project_dir/$configured"
+  fi
+}
+
+configure_local_updates() {
+  local state_dir default_proxies
+  state_dir="$(local_update_state_dir)"
+  [[ "$project_dir" =~ ^/[A-Za-z0-9._/-]+$ && "$state_dir" =~ ^/[A-Za-z0-9._/-]+$ ]] || {
+    echo "Local updates require project and state paths without spaces or shell metacharacters." >&2
+    exit 1
+  }
+  default_proxies="${STAR_API_DEFAULT_IMAGE_PROXIES:-ghcr.nju.edu.cn,ghcr.1ms.run,ghcr.chenby.cn}"
+  [[ "$default_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]] || { echo "STAR_API_DEFAULT_IMAGE_PROXIES is invalid." >&2; exit 1; }
+  [[ ! -L "$state_dir" && ! -L "$state_dir/inbox" ]] || { echo "Local update directories must not be symbolic links." >&2; exit 1; }
+  set_env_value STAR_API_UPDATE_STATE_DIR "$state_dir"
+  if [[ -z "$(env_value STAR_API_IMAGE_PROXIES)" ]]; then set_env_value STAR_API_IMAGE_PROXIES "$default_proxies"; fi
+  install -d -m 0750 -o 0 -g 1001 "$state_dir"
+  install -d -m 0770 -o 1001 -g 1001 "$state_dir/inbox"
+}
+
+install_local_update_units() {
+  local state_dir unit_dir temporary bash_path
+  [[ "$EUID" -eq 0 ]] || { echo "Enable local updates as root so the systemd service can manage Docker." >&2; exit 1; }
+  require_command install
+  require_command mktemp
+  require_command systemctl
+  bash_path="$(command -v bash)"
+  state_dir="$(local_update_state_dir)"
+  unit_dir="/etc/systemd/system"
+  mkdir -p "$project_dir/.deploy-tmp"
+  temporary="$(mktemp -d "$project_dir/.deploy-tmp/systemd.XXXXXXXX")"
+  cat > "$temporary/star-api-local-update.service" <<UNIT
+[Unit]
+Description=Star-API local production update
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=$project_dir
+Environment=STAR_API_PROJECT_DIR=$project_dir
+Environment=STAR_API_ENV_FILE=$env_file
+Environment=STAR_API_COMPOSE_FILE=$compose_file
+Environment=STAR_API_UPDATE_STATE_DIR=$state_dir
+ExecStart=$bash_path $project_dir/scripts/process-local-update.sh
+TimeoutStartSec=0
+UNIT
+  cat > "$temporary/star-api-local-update.path" <<UNIT
+[Unit]
+Description=Watch for Star-API update requests
+
+[Path]
+PathExists=$state_dir/inbox/request
+Unit=star-api-local-update.service
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  install -m 0644 "$temporary/star-api-local-update.service" "$unit_dir/star-api-local-update.service"
+  install -m 0644 "$temporary/star-api-local-update.path" "$unit_dir/star-api-local-update.path"
+  rm -rf -- "$temporary"
+  install -m 0640 -o 0 -g 1001 /dev/null "$state_dir/enabled"
+  systemctl daemon-reload
+  systemctl enable --now star-api-local-update.path
+}
+
+enable_local_updates() {
+  configure_local_updates
+  compose up -d app
+  install_local_update_units
+  echo "Host-local platform updates are enabled."
+}
+
 command_name="${1:-}"
 if [[ -z "$command_name" || "$command_name" == "--help" || "$command_name" == "-h" ]]; then
   usage
@@ -83,9 +170,19 @@ case "$command_name" in
     [[ $# -eq 0 ]] || { usage >&2; exit 2; }
     ensure_compose
     ensure_env
+    local_updates_available=0
+    if [[ "$EUID" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
+      configure_local_updates
+      local_updates_available=1
+    fi
     compose config --quiet
     compose pull
     compose up -d
+    if [[ "$local_updates_available" == "1" ]]; then
+      install_local_update_units
+    else
+      echo "Run 'sudo bash scripts/production.sh enable-updates' to enable platform-admin updates."
+    fi
     compose ps
     ;;
   check)
@@ -110,6 +207,12 @@ case "$command_name" in
     [[ $# -eq 0 ]] || { usage >&2; exit 2; }
     ensure_compose
     [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
+    enable_local_updates
+    ;;
+  enable-github-updates)
+    [[ $# -eq 0 ]] || { usage >&2; exit 2; }
+    ensure_compose
+    [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
     token="${STAR_API_GITHUB_TOKEN:-}"
     if [[ -z "$token" ]]; then
       printf 'GitHub Actions token: ' >&2
@@ -124,7 +227,7 @@ case "$command_name" in
     unset token
     set_env_value STAR_API_GITHUB_TOKEN_FILE /run/star-api-secrets/GITHUB_ACTIONS_TOKEN
     compose up -d app
-    echo "Platform-admin updates are enabled. Open Admin Settings and use System Install & Update."
+    echo "GitHub Actions fallback updates are enabled."
     ;;
   status)
     [[ $# -eq 0 ]] || { usage >&2; exit 2; }

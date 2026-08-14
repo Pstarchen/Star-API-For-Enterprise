@@ -49,6 +49,9 @@ services:
       PHP_RUNNER_URL: http://php-runner:8080/execute
       API_ASSET_STORAGE_PATH: /var/lib/star-api/assets
       MEDIA_MAX_API_GB: ${MEDIA_MAX_API_GB:-100}
+      STAR_API_LOCAL_UPDATE_DIR: /var/lib/star-api/update
+      STAR_API_UPDATE_FEED_URL: ${STAR_API_UPDATE_FEED_URL:-}
+      STAR_API_UPDATE_LATEST_VERSION: ${STAR_API_UPDATE_LATEST_VERSION:-}
       STAR_API_GITHUB_TOKEN_FILE: ${STAR_API_GITHUB_TOKEN_FILE:-}
       STAR_API_GITHUB_REPOSITORY: ${STAR_API_GITHUB_REPOSITORY:-Pstarchen/Star-API-For-Enterprise}
       STAR_API_GITHUB_DEPLOY_WORKFLOW: ${STAR_API_GITHUB_DEPLOY_WORKFLOW:-deploy-production.yml}
@@ -58,6 +61,7 @@ services:
     volumes:
       - starapi-api-assets:/var/lib/star-api/assets
       - starapi-secrets:/run/star-api-secrets:ro
+      - ${STAR_API_UPDATE_STATE_DIR:-./.star-api-update}:/var/lib/star-api/update
     depends_on:
       secrets-init:
         condition: service_completed_successfully

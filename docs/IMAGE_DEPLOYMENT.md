@@ -95,9 +95,9 @@ docker compose --env-file .env.production -f compose.production.yml exec app nod
 
 ### 推荐：服务器更新器
 
-仓库提供服务器侧更新器。它不会把 Docker Socket 暴露给网站，也不会读取或显示环境文件中的密钥。更新器从 GHCR 镜像标签中发现最新稳定 `X.Y.Z` 版本，不依赖服务器访问 GitHub；随后校验 App、迁移器和 PHP Runner 三套同版本镜像，创建 PostgreSQL、媒体卷、密钥卷、环境和 Compose 备份，再修改 `STAR_API_VERSION`、执行迁移并验证健康接口中的版本号和数据库状态。远程查询和镜像拉取均具有超时与重试边界。
+仓库提供服务器侧更新器。它不会把 Docker Socket 暴露给网站容器，也不会读取或显示环境文件中的密钥。`production:install` 在 root + systemd 环境会自动安装 `star-api-local-update.path`；已有部署运行一次 `npm run production:enable-updates` 即可。管理员在平台点击更新后，应用只向受限状态目录写入严格校验的版本请求，宿主机服务再创建 PostgreSQL、媒体卷、密钥卷、环境和 Compose 备份，拉取同版本 App、迁移器和 PHP Runner，执行迁移并验证健康状态。
 
-服务器需安装 Bash、curl、jq、GNU coreutils（提供 `timeout`）、flock 和 Docker Compose v2。Debian/Ubuntu 可执行：
+服务器需安装 Bash、curl、jq、GNU coreutils（提供 `timeout`）、flock、systemd 和 Docker Compose v2。Debian/Ubuntu 可执行：
 
 ```bash
 apt-get update && apt-get install -y bash curl jq coreutils util-linux
@@ -107,6 +107,7 @@ apt-get update && apt-get install -y bash curl jq coreutils util-linux
 cd /opt/Star-API-For-Enterprise
 bash scripts/update-production.sh --check
 bash scripts/update-production.sh
+npm run production:enable-updates
 ```
 
 指定版本升级：
@@ -115,7 +116,18 @@ bash scripts/update-production.sh
 bash scripts/update-production.sh 0.1.8
 ```
 
-更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。镜像拉取单次默认等待 1800 秒；网络较慢时可在 `.env.production` 中设置 `STAR_API_IMAGE_PULL_TIMEOUT=3600`，允许范围为 60-7200 秒。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
+更新器使用 `.star-api-update.lock` 防止重复执行，备份保存在 `backups/<时间-版本>/`，本机任务状态保存在 `STAR_API_UPDATE_STATE_DIR`。可通过 `STAR_API_ENV_FILE`、`STAR_API_COMPOSE_FILE` 和 `STAR_API_HEALTH_URL` 覆盖非标准路径。镜像拉取单次默认等待 1800 秒；`STAR_API_IMAGE_PROXIES` 中的代理按顺序尝试，并使用官方平台摘要校验内容。脚本默认拒绝降级；只有确认旧应用兼容当前数据库后，才可以临时设置 `STAR_API_ALLOW_DOWNGRADE=1` 并指定旧版本。
+
+完全不依赖 GitHub 时，将 `.env.production` 中的 `STAR_API_APP_IMAGE`、`STAR_API_MIGRATOR_IMAGE` 和 `STAR_API_PHP_RUNNER_IMAGE` 改为自有或云厂商镜像仓库，并配置独立版本源：
+
+```dotenv
+STAR_API_APP_IMAGE=registry.example.com/star-api/app
+STAR_API_MIGRATOR_IMAGE=registry.example.com/star-api/migrator
+STAR_API_PHP_RUNNER_IMAGE=registry.example.com/star-api/php-runner
+STAR_API_UPDATE_FEED_URL=https://updates.example.com/star-api/stable.json
+```
+
+版本源响应为 `{"latestVersion":"0.1.15"}`。私有仓库凭据使用宿主机 `docker login` 管理，不写入平台数据库。指定版本更新也可直接运行 `npm run production:update -- 0.1.15`，不需要访问 GitHub API。
 
 迁移执行后不会自动切回旧镜像，因为旧应用不一定兼容新数据库。失败时脚本会保留目标版本、输出日志命令和备份路径，由管理员根据发布说明决定修复当前版本或完整恢复数据库、媒体与密钥备份。
 
@@ -147,7 +159,7 @@ Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷
 
 ### GitHub Actions 受保护部署
 
-仓库提供 `Deploy production` 手动工作流。它只接受 SSH 私钥，不接受明文密码；服务器不需要向网站容器暴露 Docker Socket，也不需要访问 GitHub。Runner 会从已校验的目标标签提取 Compose，再将 Compose 和更新器传入服务器；服务器只需能从 GHCR 拉取镜像。先在 GitHub 仓库的 `Settings -> Environments` 创建 `production` 环境，按需设置审批人和受保护分支，再配置：
+仓库保留 `Deploy production` 手动工作流用于受保护发布。它只接受 SSH 私钥，不接受明文密码；Runner 读取官方多架构清单后，把目标平台 SHA256 摘要交给服务器，服务器从 `PRODUCTION_IMAGE_PROXIES` 依次按摘要拉取并重标记镜像，只传输小型 Compose 和更新脚本。发布完成后工作流会自动启用宿主机本地更新服务，后续日常更新不再依赖 Actions。
 
 | 类型 | 名称 | 用途 |
 | --- | --- | --- |
@@ -158,15 +170,16 @@ Compose 会按新标签重建三个应用容器，PostgreSQL、Redis、媒体卷
 | Variable | `PRODUCTION_SSH_USER` | SSH 用户，默认 `root` |
 | Variable | `PRODUCTION_DEPLOY_PATH` | 仓库在服务器上的绝对路径，如 `/opt/Star-API-For-Enterprise` |
 | Variable | `PRODUCTION_HEALTH_URL` | 可选，反向代理后的公网 `/api/health` 地址 |
+| Variable | `PRODUCTION_IMAGE_PROXIES` | 可选，逗号分隔的 GHCR 代理主机；镜像始终按官方摘要校验 |
 
 部署公钥应只安装到目标用户的 `~/.ssh/authorized_keys`，私钥只保存在 GitHub Environment Secret 中。`PRODUCTION_SSH_KNOWN_HOSTS` 必须来自可信的服务器控制台，不要在未核对指纹的情况下直接信任 `ssh-keyscan` 输出。
 
 在仓库 `Actions -> Deploy production -> Run workflow` 中填写不带 `v` 的稳定版本，并输入 `DEPLOY` 确认。工作流会依次执行：
 
 1. 校验版本标签、SSH 配置和部署路径。
-2. 使用固定主机指纹建立 SSH 连接，从目标标签提取并传输版本化 Compose 与受审更新器。
-3. 更新器创建数据库、媒体、密钥、环境文件和当前 Compose 备份，带重试地拉取镜像、执行迁移并更新容器。
-4. 验证 PostgreSQL、Redis、App 和 PHP Runner 都在运行，且内外健康接口的版本号和数据库状态正确。
+2. 使用固定主机指纹建立 SSH 连接，按官方摘要从可用代理拉取目标平台镜像。
+3. 传输版本化 Compose 与更新器，创建数据库、媒体、密钥、环境和当前 Compose 备份，执行迁移并更新容器。
+4. 自动安装本机更新 systemd 服务，验证 PostgreSQL、Redis、App 和 PHP Runner 以及内外健康接口。
 
 ## 6. 回滚边界
 

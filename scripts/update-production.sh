@@ -10,6 +10,18 @@ env_file="${STAR_API_ENV_FILE:-$project_dir/.env.production}"
 compose_file="${STAR_API_COMPOSE_FILE:-$project_dir/compose.production.yml}"
 next_compose_file="${STAR_API_NEXT_COMPOSE_FILE:-}"
 mode="update"
+next_env=""
+next_compose=""
+release_assets_dir=""
+release_container=""
+
+cleanup_update_temp() {
+  [[ -z "$release_container" ]] || docker rm --force "$release_container" >/dev/null 2>&1 || true
+  [[ -z "$release_assets_dir" ]] || rm -rf -- "$release_assets_dir"
+  [[ -z "$next_env" ]] || rm -f -- "$next_env"
+  [[ -z "$next_compose" ]] || rm -f -- "$next_compose"
+}
+trap cleanup_update_temp EXIT
 
 usage() {
   printf '%s\n' \
@@ -24,7 +36,7 @@ if [[ "${1:-}" == "--check" ]]; then mode="check"; shift; fi
 if [[ $# -gt 1 ]]; then usage >&2; exit 2; fi
 requested_version="${1:-latest}"
 
-for command in awk chmod cp curl date docker flock grep head jq mkdir mv rm sed seq sleep sort tail tar timeout tr; do
+for command in awk chmod cp curl date docker find flock grep head install jq mkdir mktemp mv rm sed seq sleep sort tail tar timeout tr uname; do
   command -v "$command" >/dev/null 2>&1 || { echo "Required command is missing: $command" >&2; exit 1; }
 done
 [[ -f "$env_file" ]] || { echo "Environment file not found: $env_file" >&2; exit 1; }
@@ -52,6 +64,11 @@ current_version="$(env_value STAR_API_VERSION)"
 app_image="$(env_value STAR_API_APP_IMAGE)"; app_image="${app_image:-ghcr.io/pstarchen/star-api-app}"
 migrator_image="$(env_value STAR_API_MIGRATOR_IMAGE)"; migrator_image="${migrator_image:-ghcr.io/pstarchen/star-api-migrator}"
 php_runner_image="$(env_value STAR_API_PHP_RUNNER_IMAGE)"; php_runner_image="${php_runner_image:-ghcr.io/pstarchen/star-api-php-runner}"
+image_proxies="${STAR_API_IMAGE_PROXIES:-$(env_value STAR_API_IMAGE_PROXIES)}"
+if [[ -n "$image_proxies" && ! "$image_proxies" =~ ^[A-Za-z0-9.-]+(,[A-Za-z0-9.-]+)*$ ]]; then
+  echo "STAR_API_IMAGE_PROXIES must be a comma-separated list of registry hosts." >&2
+  exit 2
+fi
 image_pull_timeout="${STAR_API_IMAGE_PULL_TIMEOUT:-$(env_value STAR_API_IMAGE_PULL_TIMEOUT)}"
 image_pull_timeout="${image_pull_timeout:-1800}"
 if [[ ! "$image_pull_timeout" =~ ^[0-9]+$ ]] || (( image_pull_timeout < 60 || image_pull_timeout > 7200 )); then
@@ -93,9 +110,33 @@ ghcr_token() {
     | jq -er '.token // .access_token'
 }
 
+image_platform() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf '%s\n' linux/amd64 ;;
+    aarch64|arm64) printf '%s\n' linux/arm64 ;;
+    *) echo "Unsupported Docker host architecture: $(uname -m)" >&2; return 1 ;;
+  esac
+}
+
+image_platform_digest() {
+  local image="$1" version="$2" image_repository token platform os architecture
+  image_repository="$(ghcr_repository "$image")"
+  token="$(ghcr_token "$image_repository")"
+  platform="$(image_platform)"
+  os="${platform%/*}"
+  architecture="${platform#*/}"
+  curl --fail --silent --show-error --connect-timeout 8 --max-time 25 \
+    -H "Authorization: Bearer $token" \
+    -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json' \
+    "https://ghcr.io/v2/${image_repository}/manifests/${version}" \
+    | jq -er --arg os "$os" --arg architecture "$architecture" '.manifests[] | select(.platform.os == $os and .platform.architecture == $architecture) | .digest' \
+    | head -n 1
+}
+
 image_manifest_exists() {
   local image="$1"
   local version="$2"
+  if image_available_locally "$image" "$version"; then return 0; fi
   if [[ "$image" != ghcr.io/* ]]; then
     timeout 45 docker manifest inspect "$image:$version" >/dev/null
     return
@@ -117,6 +158,25 @@ image_available_locally() {
   docker image inspect "$image:$version" >/dev/null 2>&1
 }
 
+pull_image_through_proxy() {
+  local image="$1" version="$2" digest platform image_repository proxy proxy_ref
+  [[ -n "$image_proxies" && "$image" == ghcr.io/* ]] || return 1
+  digest="$(image_platform_digest "$image" "$version")" || return 1
+  [[ "$digest" =~ ^sha256:[a-f0-9]{64}$ ]] || return 1
+  platform="$(image_platform)"
+  image_repository="$(ghcr_repository "$image")"
+  IFS=',' read -r -a proxies <<< "$image_proxies"
+  for proxy in "${proxies[@]}"; do
+    proxy_ref="${proxy}/${image_repository}@${digest}"
+    echo "Pulling $image:$version through $proxy with official digest $digest"
+    if timeout "$image_pull_timeout" docker pull --platform "$platform" "$proxy_ref"; then
+      docker tag "$proxy_ref" "$image:$version"
+      return 0
+    fi
+  done
+  return 1
+}
+
 pull_image() {
   local image="$1"
   local version="$2"
@@ -124,6 +184,7 @@ pull_image() {
     echo "Image is already present locally: $image:$version"
     return 0
   fi
+  if pull_image_through_proxy "$image" "$version"; then return 0; fi
   timeout "$image_pull_timeout" docker pull "$image:$version"
 }
 
@@ -161,6 +222,13 @@ prune_update_space() {
 
 backup_assets() {
   "${compose[@]}" run --rm --no-deps --user 0:0 -v "$backup_dir:/backup" app sh -c 'tar -C /var/lib/star-api/assets -czf /backup/assets.tar.gz .'
+}
+
+install_release_file() {
+  local source="$1" destination="$2" mode="$3" temporary
+  temporary="${destination}.star-api-release.$$"
+  install -m "$mode" "$source" "$temporary"
+  mv -- "$temporary" "$destination"
 }
 
 if [[ "$requested_version" == "latest" ]]; then
@@ -215,10 +283,25 @@ retry_command "Image pull for $app_image:$target_version" 3 12 pull_image "$app_
 retry_command "Image pull for $migrator_image:$target_version" 3 12 pull_image "$migrator_image" "$target_version"
 retry_command "Image pull for $php_runner_image:$target_version" 3 12 pull_image "$php_runner_image" "$target_version"
 
+if [[ "${STAR_API_USE_IMAGE_RELEASE_ASSETS:-0}" == "1" && -z "$next_compose_file" ]]; then
+  mkdir -p "$project_dir/.deploy-tmp"
+  release_assets_dir="$(mktemp -d "$project_dir/.deploy-tmp/release.XXXXXXXX")"
+  release_container="$(docker create "$app_image:$target_version")"
+  docker cp "$release_container:/opt/star-api-release/." "$release_assets_dir"
+  docker rm "$release_container" >/dev/null
+  release_container=""
+  [[ "$(jq -er '.version' "$release_assets_dir/package.json")" == "$target_version" ]] || {
+    echo "Release assets do not match target version $target_version." >&2
+    exit 1
+  }
+  for release_file in compose.production.yml scripts/update-production.sh scripts/production.sh scripts/process-local-update.sh; do
+    [[ -f "$release_assets_dir/$release_file" ]] || { echo "Release asset is missing: $release_file" >&2; exit 1; }
+  done
+  next_compose_file="$release_assets_dir/compose.production.yml"
+fi
+
 next_env="${env_file}.star-api-update.$$"
 next_compose="${compose_file}.star-api-update.$$"
-cleanup_staged_files() { rm -f "$next_env" "$next_compose"; }
-trap cleanup_staged_files EXIT
 
 if [[ -n "$next_compose_file" ]]; then
   cp "$next_compose_file" "$next_compose"
@@ -274,6 +357,16 @@ if [[ "$healthy" != "1" ]]; then
   "${compose[@]}" logs --tail=200 migrate app php-runner >&2 || true
   echo "Automatic image rollback is disabled after migrations. Backup: $backup_dir" >&2
   exit 1
+fi
+
+if [[ -n "$release_assets_dir" ]]; then
+  install -d -m 755 "$project_dir/scripts"
+  install_release_file "$release_assets_dir/scripts/update-production.sh" "$project_dir/scripts/update-production.sh" 700
+  install_release_file "$release_assets_dir/scripts/production.sh" "$project_dir/scripts/production.sh" 700
+  install_release_file "$release_assets_dir/scripts/process-local-update.sh" "$project_dir/scripts/process-local-update.sh" 700
+  if [[ -f "$release_assets_dir/.env.production.example" ]]; then
+    install_release_file "$release_assets_dir/.env.production.example" "$project_dir/.env.production.example" 600
+  fi
 fi
 
 "${compose[@]}" ps

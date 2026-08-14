@@ -30,6 +30,8 @@ jobs:
       - run: npm run test:upstream
       - run: npm run test:epay
       - run: npm run test:production-updater
+      - run: npm run test:local-update-worker
+      - run: npm run test:system-update
       - run: npm run test:workflows
       - run: npm run lint
       - run: npm run typecheck

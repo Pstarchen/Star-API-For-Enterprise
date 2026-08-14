@@ -109,7 +109,8 @@ jobs:
           install -m 600 compose.production.yml "$RUNNER_TEMP/star-api-deploy/compose.production.yml"
           install -m 700 scripts/update-production.sh "$RUNNER_TEMP/star-api-deploy/update-production.sh"
           install -m 700 scripts/production.sh "$RUNNER_TEMP/star-api-deploy/production.sh"
-          tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh production.sh
+          install -m 700 scripts/process-local-update.sh "$RUNNER_TEMP/star-api-deploy/process-local-update.sh"
+          tar -C "$RUNNER_TEMP/star-api-deploy" -czf "$RUNNER_TEMP/star-api-deploy.tar.gz" compose.production.yml update-production.sh production.sh process-local-update.sh
 
       - name: Inspect and update production
         shell: bash
@@ -234,8 +235,10 @@ jobs:
           test -f "$payload_dir/compose.production.yml"
           test -f "$payload_dir/update-production.sh"
           test -f "$payload_dir/production.sh"
+          test -f "$payload_dir/process-local-update.sh"
           chmod 700 "$payload_dir/update-production.sh"
           chmod 700 "$payload_dir/production.sh"
+          chmod 700 "$payload_dir/process-local-update.sh"
 
           STAR_API_PROJECT_DIR="$deploy_path" \
           STAR_API_NEXT_COMPOSE_FILE="$payload_dir/compose.production.yml" \
@@ -248,6 +251,10 @@ jobs:
           install -d -m 755 "$deploy_path/scripts"
           install -m 700 "$payload_dir/update-production.sh" "$deploy_path/scripts/update-production.sh"
           install -m 700 "$payload_dir/production.sh" "$deploy_path/scripts/production.sh"
+          install -m 700 "$payload_dir/process-local-update.sh" "$deploy_path/scripts/process-local-update.sh"
+          STAR_API_PROJECT_DIR="$deploy_path" \
+          STAR_API_DEFAULT_IMAGE_PROXIES="$PRODUCTION_IMAGE_PROXIES" \
+            bash "$payload_dir/production.sh" enable-updates
 
           compose=(docker compose --env-file .env.production -f compose.production.yml)
           for service in postgres redis app php-runner; do

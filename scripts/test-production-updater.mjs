@@ -23,7 +23,7 @@ printf '%s\\n' "$*" >> "$STAR_API_TEST_LOG"
 case "$1 $2" in
   "compose version") exit 0 ;;
   "manifest inspect") exit 0 ;;
-  "image inspect") exit 1 ;;
+  "image inspect") [ "\${STAR_API_TEST_IMAGE_LOCAL:-0}" = "1" ] && exit 0; exit 1 ;;
 esac
 case "$*" in
   compose*" config --quiet") exit 0 ;;
@@ -46,6 +46,7 @@ case "$*" in
     printf '%s\\n' '{"name":"pstarchen/star-api-app","tags":["sha-deadbeef","0.1.4","0.1.6-rc.1","0.1.6"]}'
     ;;
   *"https://ghcr.io/v2/"*"/manifests/0.1.6"*)
+    printf '%s\n' '{"manifests":[{"digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","platform":{"os":"linux","architecture":"amd64"}}]}'
     ;;
   *"http://127.0.0.1:18081/api/health"*)
     printf '%s\\n' '{"version":"0.1.6","database":"connected"}'
@@ -102,6 +103,21 @@ assert.equal((latestCommands.match(/\/tags\/list$/gm) ?? []).length, 1);
 assert.equal((latestCommands.match(/\/manifests\/0\.1\.6$/gm) ?? []).length, 3);
 
 writeFileSync(log, "");
+const localImagesResult = spawnSync("bash", [updater, "--check", "0.1.6"], {
+  cwd: project,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    STAR_API_PROJECT_DIR: project,
+    STAR_API_TEST_LOG: log,
+    STAR_API_TEST_IMAGE_LOCAL: "1",
+  },
+});
+assert.equal(localImagesResult.status, 0, localImagesResult.stderr || localImagesResult.stdout);
+assert.doesNotMatch(readFileSync(log, "utf8"), /\/manifests\/0\.1\.6$/m);
+
+writeFileSync(log, "");
 const updateResult = spawnSync("bash", [updater, "0.1.6"], {
   cwd: project,
   encoding: "utf8",
@@ -135,6 +151,25 @@ const customTimeoutResult = spawnSync("bash", [updater, "0.1.6"], {
 
 assert.equal(customTimeoutResult.status, 0, customTimeoutResult.stderr || customTimeoutResult.stdout);
 assert.equal((readFileSync(log, "utf8").match(/^timeout 900 docker pull /gm) ?? []).length, 3);
+
+writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nAPP_PORT=18081\nSTAR_API_IMAGE_PULL_TIMEOUT=900\nSTAR_API_IMAGE_PROXIES=ghcr.nju.edu.cn\n");
+writeFileSync(log, "");
+const proxyResult = spawnSync("bash", [updater, "0.1.6"], {
+  cwd: project,
+  encoding: "utf8",
+  env: {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    STAR_API_PROJECT_DIR: project,
+    STAR_API_TEST_LOG: log,
+  },
+});
+
+assert.equal(proxyResult.status, 0, proxyResult.stderr || proxyResult.stdout);
+const proxyCommands = readFileSync(log, "utf8");
+assert.equal((proxyCommands.match(/^timeout 900 docker pull --platform linux\/amd64 ghcr\.nju\.edu\.cn\/pstarchen\/star-api-[^@]+@sha256:a{64}$/gm) ?? []).length, 3);
+assert.equal((proxyCommands.match(/^tag ghcr\.nju\.edu\.cn\/pstarchen\/star-api-[^@]+@sha256:a{64} ghcr\.io\/pstarchen\/star-api-[^:]+:0\.1\.6$/gm) ?? []).length, 3);
+assert.equal((proxyCommands.match(/^timeout 900 docker pull ghcr\.io\//gm) ?? []).length, 0);
 
 writeFileSync(join(project, ".env.production"), "STAR_API_VERSION=0.1.5\nSTAR_API_IMAGE_PULL_TIMEOUT=30\n");
 const invalidTimeoutResult = spawnSync("bash", [updater, "--check", "0.1.6"], {

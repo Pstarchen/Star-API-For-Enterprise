@@ -23,6 +23,8 @@ const qualityCommands = ciWorkflow.jobs.quality.steps.map((step) => step.run).fi
 assert(qualityCommands.includes("npm run test:image-signature"), "CI must test tolerant image signature detection");
 assert(qualityCommands.includes("npm run test:php-package"), "CI must test PHP package entry discovery");
 assert(qualityCommands.includes("npm run test:upstream"), "CI must test external upstream URL handling");
+assert(qualityCommands.includes("npm run test:system-update"), "CI must test host-local system updates");
+assert(qualityCommands.includes("npm run test:local-update-worker"), "CI must test the host-local update worker");
 const containerNames = ciWorkflow?.jobs?.container?.strategy?.matrix?.include?.map((item) => item.name) ?? [];
 assert(containerNames.includes("app") && containerNames.includes("php-runner"), "CI must build both app and PHP runner images");
 
@@ -39,6 +41,8 @@ assert(deployScript.includes('.platform.architecture == $architecture'), "Produc
 assert(deployScript.includes('proxy_ref="${proxy}/${image#ghcr.io/}@${official_digest}"'), "Production deploy proxy pulls must use the official digest");
 assert(deployScript.includes('docker tag "$proxy_ref" "$image"'), "Production deploy must tag verified proxy images with the official name");
 assert(!deployScript.includes('docker save "${release_images[@]}"'), "Production deploy must not stream large image archives over SSH");
+assert(deployScript.includes('process-local-update.sh'), "Production deploy must install the host-local update worker");
+assert(deployScript.includes('bash "$payload_dir/production.sh" enable-updates'), "Production deploy must enable host-local updates");
 
 const bash = spawnSync("bash", ["--version"], { encoding: "utf8" });
 if (bash.status === 0) {
