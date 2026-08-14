@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
 import { lockApiProduct } from "@/lib/server/api-product-lock";
@@ -21,6 +22,7 @@ function uploadError(error: unknown) {
   const limits = mediaStorageLimits();
   const messages: Record<string, string> = {
     MEDIA_API_LIMIT: `单个 API 的媒体总量不能超过 ${Number(limits.maxApiBytes / BigInt(1024 ** 3))} GB`,
+    MEDIA_FILE_SIZE_LIMIT: `单个媒体文件不能超过 ${Number(limits.maxFileBytes / BigInt(1024 ** 3))} GB`,
     MEDIA_FILE_LIMIT: `单个 API 最多保存 ${limits.maxFiles.toLocaleString("zh-CN")} 个媒体文件`,
     EMPTY_MEDIA: "媒体文件不能为空",
     MEDIA_ARCHIVE_SIZE_LIMIT: `单个 ZIP 不能超过 ${Number(limits.maxArchiveBytes / BigInt(1024 ** 3))} GB`,
@@ -53,7 +55,18 @@ async function persistMedia(input: {
   const limits = mediaStorageLimits();
   const asset = await prisma.$transaction(async (transaction) => {
     if (!(await lockApiProduct(transaction, input.productId))) throw new Error("API_NOT_FOUND");
-    const duplicate = await transaction.apiAsset.findFirst({ where: { productId: input.productId, kind: input.kind, groupKey: input.stored.checksum } });
+    let duplicate = await transaction.apiAsset.findFirst({ where: { productId: input.productId, kind: input.kind, groupKey: input.stored.checksum } });
+    if (!duplicate) {
+      const legacyAssets = await transaction.apiAsset.findMany({ where: { productId: input.productId, kind: input.kind, groupKey: "", storageKey: null } });
+      for (const legacyAsset of legacyAssets) {
+        const checksum = createHash("sha256").update(legacyAsset.data).digest("hex");
+        await transaction.apiAsset.updateMany({ where: { id: legacyAsset.id, groupKey: "" }, data: { groupKey: checksum } });
+        if (checksum === input.stored.checksum) {
+          duplicate = legacyAsset;
+          break;
+        }
+      }
+    }
     if (duplicate) return duplicate;
     const [count, size] = await Promise.all([
       transaction.apiAsset.count({ where: { productId: input.productId, kind: input.kind } }),
@@ -72,7 +85,7 @@ export async function GET() {
   const auth = await manager();
   if ("error" in auth) return auth.error;
   const limits = mediaStorageLimits();
-  return Response.json({ code: 200, data: { maxApiBytes: Number(limits.maxApiBytes), maxFiles: limits.maxFiles } }, { headers: noStoreHeaders });
+  return Response.json({ code: 200, data: { maxApiBytes: Number(limits.maxApiBytes), maxFileBytes: Number(limits.maxFileBytes), maxFiles: limits.maxFiles } }, { headers: noStoreHeaders });
 }
 
 export async function POST(request: Request) {
@@ -92,13 +105,13 @@ export async function POST(request: Request) {
   const limits = mediaStorageLimits();
   const name = decodedFileName(encodedName);
   const archive = isArchive(name, request.headers.get("content-type"));
-  if (contentLength > (archive ? limits.maxArchiveBytes : limits.maxApiBytes)) return Response.json({ code: 409, message: uploadError(new Error(archive ? "MEDIA_ARCHIVE_SIZE_LIMIT" : "MEDIA_API_LIMIT")) }, { status: 409, headers: noStoreHeaders });
+  if (contentLength > (archive ? limits.maxArchiveBytes : limits.maxFileBytes)) return Response.json({ code: 409, message: uploadError(new Error(archive ? "MEDIA_ARCHIVE_SIZE_LIMIT" : "MEDIA_FILE_SIZE_LIMIT")) }, { status: 409, headers: noStoreHeaders });
   const context = { productId, kind, actorId: auth.user.id, tenantId: auth.workspace?.tenantId, ipAddress: requestIp(request) };
 
   if (archive) {
     let extracted: Awaited<ReturnType<typeof storeMediaArchiveRequest>>;
     try {
-      extracted = await storeMediaArchiveRequest({ productId, body: request.body, kind, maximumArchiveBytes: limits.maxArchiveBytes, maximumExpandedBytes: limits.maxArchiveExpandedBytes, maximumFiles: limits.maxFiles });
+      extracted = await storeMediaArchiveRequest({ productId, body: request.body, kind, maximumArchiveBytes: limits.maxArchiveBytes, maximumFileBytes: limits.maxFileBytes, maximumExpandedBytes: limits.maxArchiveExpandedBytes, maximumFiles: limits.maxFiles });
     } catch (error) {
       return Response.json({ code: 400, message: uploadError(error) }, { status: 400, headers: noStoreHeaders });
     }
@@ -125,7 +138,7 @@ export async function POST(request: Request) {
 
   let stored: Awaited<ReturnType<typeof storeMediaRequest>> | null = null;
   try {
-    stored = await storeMediaRequest({ productId, encodedName, body: request.body, kind, maximumBytes: limits.maxApiBytes, declaredMimeType: request.headers.get("content-type") ?? undefined });
+    stored = await storeMediaRequest({ productId, encodedName, body: request.body, kind, maximumBytes: limits.maxFileBytes, declaredMimeType: request.headers.get("content-type") ?? undefined });
     const { asset, duplicate } = await persistMedia({ ...context, stored });
     if (duplicate) {
       await removeStoredMedia(stored.storageKey).catch(() => undefined);

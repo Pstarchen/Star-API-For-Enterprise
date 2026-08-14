@@ -5,13 +5,15 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, rename, stat, unlink } from "node:fs/promises";
 import { basename, extname, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
-import { Unzip, UnzipInflate } from "fflate";
+import { Unzip, UnzipInflate, type UnzipFile } from "fflate";
 import { detectImageSignature } from "@/lib/image-signature";
 
 const DEFAULT_MAX_API_GB = 100;
+const DEFAULT_MAX_FILE_GB = 2;
 const DEFAULT_MAX_ARCHIVE_GB = 2;
 const DEFAULT_MAX_ARCHIVE_EXPANDED_GB = 20;
 const MAX_MEDIA_FILES = 10_000;
+const ARCHIVE_INPUT_CHUNK_BYTES = 256 * 1024;
 
 export type MediaKind = "IMAGE" | "VIDEO";
 export type StoredMedia = { storageKey: string; name: string; mimeType: string; size: bigint; kind: MediaKind; checksum: string };
@@ -26,6 +28,7 @@ function positiveNumber(value: string | undefined, fallback: number) {
 export function mediaStorageLimits() {
   return {
     maxApiBytes: BigInt(Math.floor(positiveNumber(process.env.MEDIA_MAX_API_GB, DEFAULT_MAX_API_GB) * 1024 * 1024 * 1024)),
+    maxFileBytes: BigInt(Math.floor(positiveNumber(process.env.MEDIA_MAX_FILE_GB, DEFAULT_MAX_FILE_GB) * 1024 * 1024 * 1024)),
     maxArchiveBytes: BigInt(Math.floor(positiveNumber(process.env.MEDIA_MAX_ARCHIVE_GB, DEFAULT_MAX_ARCHIVE_GB) * 1024 * 1024 * 1024)),
     maxArchiveExpandedBytes: BigInt(Math.floor(positiveNumber(process.env.MEDIA_MAX_ARCHIVE_EXPANDED_GB, DEFAULT_MAX_ARCHIVE_EXPANDED_GB) * 1024 * 1024 * 1024)),
     maxFiles: MAX_MEDIA_FILES,
@@ -90,6 +93,15 @@ const videoMimeByExtension: Record<string, string> = {
   ".webm": "video/webm",
 };
 
+const safeImageResponseMimeTypes = new Set(Object.values(imageMimeByExtension));
+const safeVideoResponseMimeTypes = new Set(Object.values(videoMimeByExtension));
+
+export function mediaResponseMimeType(kind: MediaKind, value: string) {
+  const mimeType = value.trim().toLowerCase().split(";", 1)[0];
+  const allowed = kind === "IMAGE" ? safeImageResponseMimeTypes : safeVideoResponseMimeTypes;
+  return allowed.has(mimeType) ? mimeType : "application/octet-stream";
+}
+
 function declaredMediaMimeType(value: string | undefined, kind: MediaKind) {
   const declared = value?.trim().toLowerCase().split(";", 1)[0] ?? "";
   const allowed = new Set(Object.values(kind === "IMAGE" ? imageMimeByExtension : videoMimeByExtension));
@@ -140,7 +152,7 @@ export async function storeMediaRequest(input: { productId: string; encodedName:
       size += BigInt(chunk.value.byteLength);
       if (size > input.maximumBytes) {
         await reader.cancel();
-        throw new Error("MEDIA_API_LIMIT");
+        throw new Error("MEDIA_FILE_SIZE_LIMIT");
       }
       hash.update(chunk.value);
       await file.write(chunk.value);
@@ -185,6 +197,7 @@ export async function storeMediaArchiveRequest(input: {
   body: ReadableStream<Uint8Array>;
   kind: MediaKind;
   maximumArchiveBytes: bigint;
+  maximumFileBytes: bigint;
   maximumExpandedBytes: bigint;
   maximumFiles: number;
 }) {
@@ -199,8 +212,22 @@ export async function storeMediaArchiveRequest(input: {
   let fileCount = 0;
   let archiveError: Error | null = null;
 
+  const discardEntry = (entry: UnzipFile) => {
+    entry.ondata = (error) => {
+      if (error && !archiveError) archiveError = new Error("INVALID_MEDIA_ARCHIVE");
+    };
+    try {
+      entry.start();
+    } catch {
+      archiveError = new Error("INVALID_MEDIA_ARCHIVE");
+    }
+  };
+
   const unzip = new Unzip((entry) => {
-    if (entry.name.endsWith("/")) return;
+    if (entry.name.endsWith("/")) {
+      discardEntry(entry);
+      return;
+    }
     fileCount += 1;
     if (fileCount > input.maximumFiles) {
       archiveError = new Error("MEDIA_ARCHIVE_FILE_LIMIT");
@@ -210,16 +237,19 @@ export async function storeMediaArchiveRequest(input: {
     try {
       name = archiveEntryName(entry.name);
     } catch (error) {
+      archiveError = error instanceof Error ? error : new Error("INVALID_MEDIA_ARCHIVE_PATH");
       results.push({ name: entry.name || "未知条目", error: errorCode(error) });
       return;
     }
     if (![0, 8].includes(entry.compression)) {
+      archiveError = new Error("UNSUPPORTED_MEDIA_ARCHIVE_COMPRESSION");
       results.push({ name, error: "UNSUPPORTED_MEDIA_ARCHIVE_COMPRESSION" });
       return;
     }
     if (entry.originalSize !== undefined) {
       const declaredSize = BigInt(entry.originalSize);
       if (declaredSize > input.maximumExpandedBytes || declaredExpandedBytes + declaredSize > input.maximumExpandedBytes) {
+        archiveError = new Error("MEDIA_ARCHIVE_EXPANDED_LIMIT");
         results.push({ name, error: "MEDIA_ARCHIVE_EXPANDED_LIMIT" });
         return;
       }
@@ -234,7 +264,7 @@ export async function storeMediaArchiveRequest(input: {
       encodedName: encodeURIComponent(name),
       body: transform.readable,
       kind: input.kind,
-      maximumBytes: input.maximumExpandedBytes,
+      maximumBytes: input.maximumFileBytes,
     }).then((stored) => {
       results.push({ name, stored });
     }).catch((error) => {
@@ -265,16 +295,27 @@ export async function storeMediaArchiveRequest(input: {
   });
   unzip.register(UnzipInflate);
 
+  const pushArchiveChunk = async (chunk: Uint8Array, final: boolean) => {
+    pendingWrites = [];
+    unzip.push(chunk, final);
+    await Promise.allSettled(pendingWrites);
+    if (archiveError) throw archiveError;
+  };
+
   try {
     while (true) {
       const { value, done } = await reader.read();
       const chunk = value ?? new Uint8Array();
       archiveBytes += BigInt(chunk.byteLength);
       if (archiveBytes > input.maximumArchiveBytes) throw new Error("MEDIA_ARCHIVE_SIZE_LIMIT");
-      pendingWrites = [];
-      unzip.push(chunk, done);
-      await Promise.allSettled(pendingWrites);
-      if (archiveError) throw archiveError;
+      if (!chunk.byteLength) {
+        if (done) await pushArchiveChunk(chunk, true);
+      } else {
+        for (let offset = 0; offset < chunk.byteLength; offset += ARCHIVE_INPUT_CHUNK_BYTES) {
+          const end = Math.min(offset + ARCHIVE_INPUT_CHUNK_BYTES, chunk.byteLength);
+          await pushArchiveChunk(chunk.subarray(offset, end), Boolean(done && end === chunk.byteLength));
+        }
+      }
       if (done) break;
     }
     await Promise.allSettled(tasks);
@@ -285,7 +326,7 @@ export async function storeMediaArchiveRequest(input: {
     await Promise.allSettled([...writers].map((writer) => writer.abort(error)));
     await Promise.allSettled(tasks);
     await Promise.allSettled(results.flatMap((result) => result.stored ? [removeStoredMedia(result.stored.storageKey)] : []));
-    if (error instanceof Error && ["MEDIA_ARCHIVE_FILE_LIMIT", "MEDIA_ARCHIVE_EXPANDED_LIMIT", "MEDIA_ARCHIVE_SIZE_LIMIT", "EMPTY_MEDIA_ARCHIVE"].includes(error.message)) throw error;
+    if (error instanceof Error && ["MEDIA_ARCHIVE_FILE_LIMIT", "MEDIA_ARCHIVE_EXPANDED_LIMIT", "MEDIA_ARCHIVE_SIZE_LIMIT", "EMPTY_MEDIA_ARCHIVE", "INVALID_MEDIA_ARCHIVE_PATH", "UNSUPPORTED_MEDIA_ARCHIVE_COMPRESSION"].includes(error.message)) throw error;
     throw new Error("INVALID_MEDIA_ARCHIVE");
   }
 }
@@ -325,8 +366,10 @@ export async function storedMediaResponse(asset: MediaAsset, request: Request) {
   const isVideo = asset.kind === "VIDEO";
   const range = isVideo ? requestedRange(request.headers.get("range"), file.size) : { start: 0, end: file.size - 1, partial: false };
   const headers = new Headers({
-    "Content-Type": asset.mimeType,
+    "Content-Type": mediaResponseMimeType(isVideo ? "VIDEO" : "IMAGE", asset.mimeType),
     "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(asset.name)}`,
+    "Content-Security-Policy": "sandbox; default-src 'none'",
+    "Cross-Origin-Resource-Policy": "cross-origin",
     "X-Content-Type-Options": "nosniff",
     "X-Star-Asset-Id": asset.id,
   });

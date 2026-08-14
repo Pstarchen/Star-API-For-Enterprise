@@ -73,6 +73,9 @@ umask 077
   printf 'PHP_CGI_BINARY=%s\n' "$php_cgi_binary"
   printf 'API_ASSET_STORAGE_PATH=%s/.data/api-assets\n' "$project_dir"
   printf 'MEDIA_MAX_API_GB=100\n'
+  printf 'MEDIA_MAX_FILE_GB=2\n'
+  printf 'MEDIA_MAX_ARCHIVE_GB=2\n'
+  printf 'MEDIA_MAX_ARCHIVE_EXPANDED_GB=20\n'
 } > "$env_file"
 
 chmod 600 "$env_file"

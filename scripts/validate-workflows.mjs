@@ -6,6 +6,7 @@ import YAML from "yaml";
 const workflowPath = resolve(".github/workflows/deploy-production.yml");
 const workflow = YAML.parse(readFileSync(workflowPath, "utf8"));
 const ciWorkflow = YAML.parse(readFileSync(resolve(".github/workflows/ci.yml"), "utf8"));
+const releaseWorkflow = YAML.parse(readFileSync(resolve(".github/workflows/release-images.yml"), "utf8"));
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -27,6 +28,21 @@ assert(qualityCommands.includes("npm run test:system-update"), "CI must test hos
 assert(qualityCommands.includes("npm run test:local-update-worker"), "CI must test the host-local update worker");
 const containerNames = ciWorkflow?.jobs?.container?.strategy?.matrix?.include?.map((item) => item.name) ?? [];
 assert(containerNames.includes("app") && containerNames.includes("php-runner"), "CI must build both app and PHP runner images");
+
+const releasePlatforms = releaseWorkflow?.jobs?.publish?.strategy?.matrix?.platform ?? [];
+assert(releasePlatforms.some((item) => item.name === "linux/amd64" && item.runner === "ubuntu-latest"), "Release must build AMD64 on a native runner");
+assert(releasePlatforms.some((item) => item.name === "linux/arm64" && item.runner === "ubuntu-24.04-arm"), "Release must build ARM64 on a native runner");
+const releaseUses = [
+  ...(releaseWorkflow?.jobs?.publish?.steps ?? []),
+  ...(releaseWorkflow?.jobs?.manifest?.steps ?? []),
+].map((step) => step.uses).filter(Boolean);
+assert(releaseUses.includes("docker/setup-buildx-action@v4"), "Release must use the Node.js 24 Buildx action");
+assert(releaseUses.includes("docker/login-action@v4"), "Release must use the Node.js 24 registry login action");
+assert(releaseUses.includes("docker/build-push-action@v7"), "Release must use the Node.js 24 build action");
+assert(!releaseUses.some((value) => value.startsWith("docker/setup-qemu-action@")), "Native release builds must not install QEMU");
+assert(releaseWorkflow?.jobs?.manifest?.needs?.includes("publish"), "Release manifests must wait for both architecture builds");
+const mergeScript = releaseWorkflow?.jobs?.manifest?.steps?.find((step) => step.name === "Merge architecture images")?.run ?? "";
+assert(mergeScript.includes('"${IMAGE}:${VERSION}-amd64"') && mergeScript.includes('"${IMAGE}:${VERSION}-arm64"'), "Release must merge both architecture images");
 
 const checkout = workflow.jobs.deploy.steps.find((step) => step.uses === "actions/checkout@v5");
 assert(checkout?.with?.["fetch-depth"] === 0, "Production checkout must fetch release tags");

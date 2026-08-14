@@ -1,9 +1,31 @@
 example.com {
-  encode zstd gzip
-  reverse_proxy 127.0.0.1:18081
+	encode zstd gzip
 
-  header {
-    -Server
-    Strict-Transport-Security "max-age=31536000; includeSubDomains" defer
-  }
+	@mediaUpload path /api/v1/admin/apis/media
+	handle @mediaUpload {
+		request_body {
+			max_size 2100MB
+		}
+		reverse_proxy 127.0.0.1:18081
+	}
+
+	@largeAdminUpload path /api/v1/admin/apis /api/v1/admin/apis/assets /api/v1/admin/settings
+	handle @largeAdminUpload {
+		request_body {
+			max_size 72MB
+		}
+		reverse_proxy 127.0.0.1:18081
+	}
+
+	handle {
+		request_body {
+			max_size 3MB
+		}
+		reverse_proxy 127.0.0.1:18081
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains" defer
+	}
 }

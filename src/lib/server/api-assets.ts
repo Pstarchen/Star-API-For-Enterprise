@@ -9,7 +9,7 @@ import type { ContentHandlerId } from "@/lib/internal-handlers";
 import { normalizePackagePath, resolvePhpEntryFile } from "@/lib/php-package";
 import { detectImageSignature } from "@/lib/image-signature";
 import { prisma } from "@/lib/server/prisma";
-import { storedMediaResponse } from "@/lib/server/media-storage";
+import { mediaResponseMimeType, storedMediaResponse } from "@/lib/server/media-storage";
 
 export const MAX_ASSET_FILES = 40;
 export const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -733,7 +733,11 @@ export async function contentResponse(productId: string, handler: ContentHandler
   const asset = await prisma.apiAsset.findFirst({ where: { productId, kind }, orderBy: { createdAt: "asc" }, skip: handler === "content.static-json" ? 0 : randomInt(count) });
   if (!asset) throw new Error("CONTENT_NOT_CONFIGURED");
   if (kind === "IMAGE" && asset.storageKey) return storedMediaResponse(asset, request);
-  const headers = new Headers({ "Content-Type": asset.mimeType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Star-Asset-Id": asset.id });
-  if (kind === "IMAGE") headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(asset.name)}`);
+  const headers = new Headers({ "Content-Type": kind === "IMAGE" ? mediaResponseMimeType("IMAGE", asset.mimeType) : asset.mimeType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "X-Star-Asset-Id": asset.id });
+  if (kind === "IMAGE") {
+    headers.set("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(asset.name)}`);
+    headers.set("Content-Security-Policy", "sandbox; default-src 'none'");
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+  }
   return { response: new Response(Buffer.from(asset.data), { status: 200, headers }), responseBytes: asset.size };
 }

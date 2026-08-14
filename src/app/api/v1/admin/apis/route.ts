@@ -6,14 +6,14 @@ import { apiSlugFromName, normalizePublicHost, normalizePublicPath, publicHostFr
 import { internalHandlerTemplates, isAssetBackedHandler, phpHandlerId, type ContentHandlerId } from "@/lib/internal-handlers";
 import { requireEnabledApiCategory } from "@/lib/server/api-categories";
 import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
-import { assetErrorMessage, inferPreparedDatasetContract, prepareApiAssets, preparedContentResponseExample, preparePhpPackage, type PreparedAsset } from "@/lib/server/api-assets";
+import { assetErrorMessage, inferPreparedDatasetContract, MAX_TOTAL_ASSET_BYTES, prepareApiAssets, preparedContentResponseExample, preparePhpPackage, type PreparedAsset } from "@/lib/server/api-assets";
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { encryptJson } from "@/lib/server/encryption";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { removeStoredMedia } from "@/lib/server/media-storage";
 import { findRouteConflict, findSlugConflict } from "@/lib/server/api-routing";
 import { prisma } from "@/lib/server/prisma";
-import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { noStoreHeaders, readLimitedFormData, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream, checkUpstreamHealth } from "@/lib/server/upstream";
 
 const handlerIds = internalHandlerTemplates.map((item) => item.id) as [string, ...string[]];
@@ -131,7 +131,7 @@ async function generatedSlug(name: string) {
 
 async function requestInput(request: Request) {
   if (!request.headers.get("content-type")?.includes("multipart/form-data")) throw new Error("MULTIPART_REQUIRED");
-  const form = await request.formData();
+  const form = await readLimitedFormData(request, MAX_TOTAL_ASSET_BYTES + 6 * 1024 * 1024);
   const raw = form.get("config");
   const decoded = typeof raw === "string" ? JSON.parse(raw) : null;
   if (!decoded || typeof decoded !== "object" || Array.isArray(decoded)) throw new Error("INVALID_CONFIG");

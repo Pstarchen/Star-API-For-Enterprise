@@ -199,6 +199,13 @@ async function main() {
   expectStatus(response.status, 200, "custom hero asset", await response.arrayBuffer());
   assert.equal(response.headers.get("content-type"), "image/jpeg");
 
+  response = await request("/api/v1/payments/alipay/notify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `payload=${"x".repeat(1024 * 1024)}`,
+  });
+  expectStatus(response.status, 413, "oversized public payment callback rejected before parsing", await response.text());
+
   for (const page of ["/admin", "/admin/apis", "/admin/subscriptions", "/admin/testing", "/admin/providers", "/admin/users", "/admin/settings", "/admin/settings/auth", "/admin/settings/integrations", "/admin/settings/payments", "/admin/monitor", "/admin/audits"]) {
     response = await request(page, {}, adminCookie);
     expectStatus(response.status, 200, `administrator page ${page}`, await response.text());
@@ -595,6 +602,13 @@ components:
   assert.equal(archiveUpload.data.uploaded, 2, "ZIP media import must persist every unique administrator-approved entry");
   assert.equal(archiveUpload.data.duplicates, 1, "ZIP media import must deduplicate matching entries");
   assert.equal(archiveUpload.data.skipped.length, 0, "valid ZIP entries must not be content-filtered");
+  const unsafeMediaArchive = zipSync({ "../escape.jpg": approvedA, "later.jpg": approvedB });
+  const unsafeArchiveUpload = await uploadMedia(adminCookie, cleanupImageApi.id, "unsafe-media.zip", unsafeMediaArchive, "application/zip", 400);
+  assert.match(unsafeArchiveUpload.message, /不安全/);
+  const unsupportedMediaArchive = Uint8Array.from(zipSync({ "unsupported.jpg": approvedA }));
+  new DataView(unsupportedMediaArchive.buffer, unsupportedMediaArchive.byteOffset, unsupportedMediaArchive.byteLength).setUint16(8, 99, true);
+  const unsupportedArchiveUpload = await uploadMedia(adminCookie, cleanupImageApi.id, "unsupported-media.zip", unsupportedMediaArchive, "application/zip", 400);
+  assert.match(unsupportedArchiveUpload.message, /不支持/);
   result = await jsonRequest(`/api/v1/admin/apis/assets?productId=${encodeURIComponent(cleanupImageApi.id)}`, {}, adminCookie);
   expectStatus(result.response.status, 200, "list ZIP-imported media", result.body);
   assert.equal(result.body.meta.total, 2);
@@ -972,6 +986,8 @@ components:
   response = await request(imageApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}` } });
   expectStatus(response.status, 200, "gateway random image call", await response.text());
   assert.match(response.headers.get("content-type") ?? "", /^image\//);
+  assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(response.headers.get("content-security-policy"), "sandbox; default-src 'none'");
   response = await request(videoApi.endpoint, { headers: { Authorization: `Bearer ${apiKey}`, Range: "bytes=0-7" } });
   expectStatus(response.status, 206, "gateway random video range call", await response.arrayBuffer());
   assert.equal(response.headers.get("content-range"), `bytes 0-7/${tinyMp4.length}`);

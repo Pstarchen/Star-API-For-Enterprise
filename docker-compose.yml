@@ -80,6 +80,9 @@ services:
       PHP_RUNNER_URL: http://php-runner:8080/execute
       API_ASSET_STORAGE_PATH: /var/lib/star-api/assets
       MEDIA_MAX_API_GB: ${MEDIA_MAX_API_GB:-100}
+      MEDIA_MAX_FILE_GB: ${MEDIA_MAX_FILE_GB:-2}
+      MEDIA_MAX_ARCHIVE_GB: ${MEDIA_MAX_ARCHIVE_GB:-2}
+      MEDIA_MAX_ARCHIVE_EXPANDED_GB: ${MEDIA_MAX_ARCHIVE_EXPANDED_GB:-20}
     volumes:
       - starapi-api-assets:/var/lib/star-api/assets
       - starapi-secrets:/run/star-api-secrets:ro

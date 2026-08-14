@@ -42,6 +42,9 @@ const runtimeNames = [
   "PHP_RUNNER_SECRET",
   "API_ASSET_STORAGE_PATH",
   "MEDIA_MAX_API_GB",
+  "MEDIA_MAX_FILE_GB",
+  "MEDIA_MAX_ARCHIVE_GB",
+  "MEDIA_MAX_ARCHIVE_EXPANDED_GB",
 ];
 
 const runtimeEnv = Object.fromEntries(runtimeNames.flatMap((name) => (

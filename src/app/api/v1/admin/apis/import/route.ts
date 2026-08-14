@@ -8,7 +8,7 @@ import { getCurrentUser, getCurrentWorkspace } from "@/lib/server/auth";
 import { getCatalogProduct } from "@/lib/server/catalog";
 import { getPlatformConfig } from "@/lib/server/installation";
 import { prisma } from "@/lib/server/prisma";
-import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { noStoreHeaders, readLimitedFormData, requestIp } from "@/lib/server/request";
 import { assertSafeUpstream } from "@/lib/server/upstream";
 
 const configSchema = z.object({ name: z.string().trim().min(2).max(80), slug: z.string().trim().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/), categoryId: z.string().min(1), publicHost: z.string().trim().toLowerCase().min(1).max(253), publicPrefix: z.string().trim().regex(/^\/(?:[A-Za-z0-9._~!$&'()*+,;=:@%-]+\/?)*$/), upstreamOverride: z.union([z.url(), z.literal("")]).default(""), visibility: z.enum(["PUBLIC", "PRIVATE", "GRAY", "INTERNAL"]).default("PUBLIC"), billingMode: z.enum(["FREE", "PER_REQUEST"]).default("FREE"), unitPrice: z.coerce.number().min(0).max(100000).default(0), defaultQpsLimit: z.coerce.number().int().min(1).max(100000).default(10) }).strict();
@@ -235,7 +235,7 @@ async function editor() {
 export async function POST(request: Request) {
   const auth = await editor();
   if ("error" in auth) return auth.error;
-  const form = await request.formData().catch(() => null);
+  const form = await readLimitedFormData(request, 3 * 1024 * 1024).catch(() => null);
   if (!form) return Response.json({ code: 400, message: "导入请求格式不正确" }, { status: 400, headers: noStoreHeaders });
   const file = form.get("document");
   const rawConfig = form.get("config");

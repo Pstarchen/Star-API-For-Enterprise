@@ -6,7 +6,7 @@ import { assetErrorMessage, inferPreparedDatasetContract, MAX_TOTAL_ASSET_BYTES,
 import { lockApiProduct } from "@/lib/server/api-product-lock";
 import { isAssetBackedHandler, isContentHandler, phpHandlerId } from "@/lib/internal-handlers";
 import { prisma } from "@/lib/server/prisma";
-import { noStoreHeaders, requestIp } from "@/lib/server/request";
+import { noStoreHeaders, readLimitedFormData, requestIp } from "@/lib/server/request";
 import { removeStoredMedia } from "@/lib/server/media-storage";
 
 async function admin() {
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const auth = await admin();
   if ("error" in auth) return auth.error;
-  const form = await request.formData().catch(() => null);
+  const form = await readLimitedFormData(request, MAX_TOTAL_ASSET_BYTES + 6 * 1024 * 1024).catch(() => null);
   if (!form) return Response.json({ code: 400, message: "上传请求格式不正确" }, { status: 400, headers: noStoreHeaders });
   const productId = String(form.get("productId") ?? "");
   const content = String(form.get("content") ?? "");
@@ -120,23 +120,36 @@ export async function DELETE(request: Request) {
   if (!clearAll && !requestedIds.length) return Response.json({ code: 400, message: "请选择要删除的内容" }, { status: 400, headers: noStoreHeaders });
   if (requestedIds.length > 500) return Response.json({ code: 400, message: "单次最多删除 500 项内容" }, { status: 400, headers: noStoreHeaders });
 
-  const assets = clearAll
-    ? await prisma.apiAsset.findMany({ where: { productId }, select: { id: true, productId: true, kind: true, name: true, storageKey: true } })
+  const requestedAssets = clearAll
+    ? []
     : await prisma.apiAsset.findMany({ where: { id: { in: requestedIds } }, select: { id: true, productId: true, kind: true, name: true, storageKey: true } });
-  if (!clearAll && assets.length !== requestedIds.length) return Response.json({ code: 404, message: "部分内容不存在，请刷新后重试" }, { status: 404, headers: noStoreHeaders });
-  const targetProductId = productId || assets[0]?.productId || "";
-  if (!targetProductId || assets.some((asset) => asset.productId !== targetProductId)) return Response.json({ code: 400, message: "不能跨 API 批量删除内容" }, { status: 400, headers: noStoreHeaders });
+  if (!clearAll && requestedAssets.length !== requestedIds.length) return Response.json({ code: 404, message: "部分内容不存在，请刷新后重试" }, { status: 404, headers: noStoreHeaders });
+  const targetProductId = productId || requestedAssets[0]?.productId || "";
+  if (!targetProductId || requestedAssets.some((asset) => asset.productId !== targetProductId)) return Response.json({ code: 400, message: "不能跨 API 批量删除内容" }, { status: 400, headers: noStoreHeaders });
   const product = await prisma.apiProduct.findUnique({ where: { id: targetProductId }, select: { id: true, internalHandler: true, provider: { select: { ownerTenantId: true } } } });
   if (!product) return Response.json({ code: 404, message: "API 不存在" }, { status: 404, headers: noStoreHeaders });
   if (!auth.isAdmin && product.provider.ownerTenantId !== auth.workspace.tenantId) return Response.json({ code: 403, message: "无权管理其他服务商的 API 内容" }, { status: 403, headers: noStoreHeaders });
-  if (product.internalHandler === phpHandlerId || assets.some((asset) => asset.kind === "PHP_SOURCE")) return Response.json({ code: 409, message: "PHP 程序包必须通过上传新 ZIP 整体替换" }, { status: 409, headers: noStoreHeaders });
-  if (!assets.length) return Response.json({ code: 200, message: "当前没有可清除的内容", data: { deleted: 0 } }, { headers: noStoreHeaders });
+  if (product.internalHandler === phpHandlerId || requestedAssets.some((asset) => asset.kind === "PHP_SOURCE")) return Response.json({ code: 409, message: "PHP 程序包必须通过上传新 ZIP 整体替换" }, { status: 409, headers: noStoreHeaders });
 
-  await prisma.$transaction(async (transaction) => {
-    if (!(await lockApiProduct(transaction, targetProductId))) throw new Error("API_NOT_FOUND");
-    await transaction.apiAsset.deleteMany({ where: { id: { in: assets.map((asset) => asset.id) }, productId: targetProductId } });
-    await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: clearAll ? "api.content.clear" : assets.length > 1 ? "api.content.batch-delete" : "api.content.delete", resource: "api-product", resourceId: targetProductId, metadata: { count: assets.length, assetIds: assets.slice(0, 500).map((asset) => asset.id), names: assets.slice(0, 20).map((asset) => asset.name) }, ipAddress: requestIp(request) } });
-  });
+  let assets = requestedAssets;
+  try {
+    assets = await prisma.$transaction(async (transaction) => {
+      if (!(await lockApiProduct(transaction, targetProductId))) throw new Error("API_NOT_FOUND");
+      const lockedAssets = await transaction.apiAsset.findMany({
+        where: clearAll ? { productId: targetProductId } : { id: { in: requestedIds }, productId: targetProductId },
+        select: { id: true, productId: true, kind: true, name: true, storageKey: true },
+      });
+      if (!clearAll && lockedAssets.length !== requestedIds.length) throw new Error("ASSET_SELECTION_CHANGED");
+      if (!lockedAssets.length) return lockedAssets;
+      await transaction.apiAsset.deleteMany({ where: { id: { in: lockedAssets.map((asset) => asset.id) }, productId: targetProductId } });
+      await transaction.auditLog.create({ data: { tenantId: auth.workspace?.tenantId, actorId: auth.user.id, action: clearAll ? "api.content.clear" : lockedAssets.length > 1 ? "api.content.batch-delete" : "api.content.delete", resource: "api-product", resourceId: targetProductId, metadata: { count: lockedAssets.length, assetIds: lockedAssets.slice(0, 500).map((asset) => asset.id), names: lockedAssets.slice(0, 20).map((asset) => asset.name) }, ipAddress: requestIp(request) } });
+      return lockedAssets;
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "ASSET_SELECTION_CHANGED") return Response.json({ code: 409, message: "内容已发生变化，请刷新后重试" }, { status: 409, headers: noStoreHeaders });
+    throw error;
+  }
+  if (!assets.length) return Response.json({ code: 200, message: "当前没有可清除的内容", data: { deleted: 0 } }, { headers: noStoreHeaders });
   await Promise.allSettled(assets.flatMap((asset) => ["IMAGE", "VIDEO"].includes(asset.kind) && asset.storageKey ? [removeStoredMedia(asset.storageKey)] : []));
   revalidatePath("/", "layout");
   return Response.json({ code: 200, message: clearAll ? `已清空 ${assets.length} 项内容` : `已删除 ${assets.length} 项内容`, data: { deleted: assets.length } }, { headers: noStoreHeaders });

@@ -3,6 +3,7 @@ import { verifyEpaySignature } from "@/lib/epay";
 import { paymentProviderSecret } from "@/lib/server/payment-providers";
 import { completePayment } from "@/lib/server/payments";
 import { prisma } from "@/lib/server/prisma";
+import { readLimitedFormData, readLimitedJson } from "@/lib/server/request";
 
 type RouteContext = { params: Promise<{ providerId: string }> };
 
@@ -10,11 +11,11 @@ async function callbackParams(request: Request) {
   if (request.method === "GET") return Object.fromEntries(new URL(request.url).searchParams.entries());
   const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
   if (contentType.includes("application/json")) {
-    const value = await request.json().catch(() => null);
+    const value = await readLimitedJson(request, 1024 * 1024).catch(() => null);
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, typeof item === "string" ? item : String(item ?? "")]));
   }
-  const form = await request.formData().catch(() => null);
+  const form = await readLimitedFormData(request, 1024 * 1024).catch(() => null);
   return form ? Object.fromEntries(Array.from(form.entries()).map(([key, value]) => [key, String(value)])) : {};
 }
 
