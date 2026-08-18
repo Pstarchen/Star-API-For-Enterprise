@@ -4,6 +4,7 @@ import Image from "next/image";
 import { Check, Clock3, Copy, Download, FileDown, KeyRound, Loader2, Play, RotateCcw, Square } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import type { CatalogProduct } from "@/lib/catalog";
+import { inferResponseContract, type ObservedResponseContract } from "@/lib/response-contract";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
 
 const requestTimeoutMs = 30_000;
@@ -97,7 +98,7 @@ function parameterValue(value: string, dataType: string): unknown {
   return value;
 }
 
-export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; gatewayUrl: string }) {
+export function RequestPlayground({ api, gatewayUrl, onResponseContract }: { api: CatalogProduct; gatewayUrl: string; onResponseContract?: (contract: ObservedResponseContract) => void }) {
   const keyRef = useRef<HTMLInputElement>(null);
   const requestControllerRef = useRef<AbortController | null>(null);
   const [hasKey, setHasKey] = useState(false);
@@ -187,17 +188,30 @@ export function RequestPlayground({ api, gatewayUrl }: { api: CatalogProduct; ga
       if (imageType) {
         const url = URL.createObjectURL(new Blob([buffer], { type: imageType }));
         setResponse({ ...metadata, kind: "image", url });
+        onResponseContract?.(inferResponseContract({ body: "", contentType: imageType, statusCode: result.status }));
       } else if (declaredType.startsWith("video/")) {
         const url = URL.createObjectURL(new Blob([buffer], { type: declaredType }));
         setResponse({ ...metadata, kind: "video", url });
+        onResponseContract?.(inferResponseContract({ body: "", contentType: declaredType, statusCode: result.status }));
       } else if (isTextResponse(declaredType)) {
         const text = decodeText(bytes, result.headers.get("content-type") ?? "");
         let formatted = text;
         try { formatted = JSON.stringify(JSON.parse(text), null, 2); } catch { /* Upstream may return non-JSON text. */ }
         setResponse({ ...metadata, kind: "text", text: formatted });
+        onResponseContract?.(inferResponseContract({ body: text, contentType: result.headers.get("content-type"), statusCode: result.status }));
       } else {
-        const url = URL.createObjectURL(new Blob([buffer], { type: contentType }));
-        setResponse({ ...metadata, kind: "binary", url });
+        const candidateText = decodeText(bytes, result.headers.get("content-type") ?? "");
+        const candidate = inferResponseContract({ body: candidateText, contentType, statusCode: result.status });
+        if (candidate.format !== "BINARY") {
+          let formatted = candidateText;
+          try { formatted = JSON.stringify(JSON.parse(candidateText), null, 2); } catch { /* Keep a non-JSON text payload readable. */ }
+          setResponse({ ...metadata, kind: "text", text: formatted });
+          onResponseContract?.(candidate);
+        } else {
+          const url = URL.createObjectURL(new Blob([buffer], { type: contentType }));
+          setResponse({ ...metadata, kind: "binary", url });
+          onResponseContract?.(candidate);
+        }
       }
     } catch (requestError) {
       if (controller.signal.aborted) setError(timedOut ? "请求超过 30 秒，已自动终止" : "请求已取消");

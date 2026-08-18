@@ -14,6 +14,7 @@ import { reserveGatewayUsage } from "@/lib/server/gateway-usage";
 import { chooseUpstreamNode, forwardRequest, rewriteUpstreamPath } from "@/lib/server/upstream";
 import { lockTenantBalance } from "@/lib/server/wallet-ledger";
 import { isContentHandler } from "@/lib/internal-handlers";
+import { observeEndpointResponse } from "@/lib/server/response-contract";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const endpointInclude = {
@@ -390,5 +391,11 @@ export async function handlePublicGateway(request: Request, publicPath: string, 
   response.headers.set("X-Billable-Units", usage.insufficient ? "0" : billableUnits.toString());
   response.headers.set("X-Request-Cost", usage.chargedAmount.toString());
   if (endpoint.corsEnabled) for (const [key, value] of Object.entries(corsHeaders(request.headers.get("origin")))) response.headers.set(key, value);
+  await observeEndpointResponse({
+    endpointId: endpoint.id,
+    response,
+    statusCode,
+    requestMethod: request.method,
+  }).catch(() => undefined);
   return response;
 }
