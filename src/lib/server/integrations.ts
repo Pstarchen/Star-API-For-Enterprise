@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import { decryptJson, encryptJson } from "@/lib/server/encryption";
 import { prisma } from "@/lib/server/prisma";
 
-export const integrationKeys = ["github", "smtp", "alipay", "wechat", "bank-transfer", "code-pay"] as const;
+export const integrationKeys = ["github", "qq", "smtp", "alipay", "wechat", "bank-transfer", "code-pay"] as const;
 export type IntegrationKey = (typeof integrationKeys)[number];
 
 function objectValue(value: unknown) {
@@ -15,7 +15,7 @@ export async function getIntegration(key: IntegrationKey, includeSecrets = false
   const setting = await prisma.integrationSetting.findUnique({ where: { key } });
   if (!setting) return { key, enabled: false, configured: false, secretConfigured: false, publicConfig: {}, secrets: {} };
   const publicConfig = objectValue(setting.publicConfig);
-  const githubClientId = typeof publicConfig.clientId === "string" ? publicConfig.clientId.trim() : "";
+  const oauthClientId = typeof publicConfig.clientId === "string" ? publicConfig.clientId.trim() : "";
   let storedSecrets: Record<string, unknown> = {};
   if (setting.secretEncrypted) {
     try { storedSecrets = decryptJson(setting.secretEncrypted); } catch { storedSecrets = {}; }
@@ -27,8 +27,8 @@ export async function getIntegration(key: IntegrationKey, includeSecrets = false
       ? Boolean(publicConfig.qrImageUrl || publicConfig.paymentUrl)
       : key === "smtp"
         ? Boolean(publicConfig.host && Number(publicConfig.port) > 0 && publicConfig.fromEmail && publicConfig.username && storedSecrets.password)
-      : key === "github"
-        ? Boolean(githubClientId && storedSecrets.clientSecret)
+      : key === "github" || key === "qq"
+        ? Boolean(oauthClientId && storedSecrets.clientSecret)
         : key === "alipay"
           ? Boolean(publicConfig.appId && publicConfig.gatewayUrl && publicConfig.notifyUrl && storedSecrets.privateKey && storedSecrets.alipayPublicKey)
           : key === "wechat"

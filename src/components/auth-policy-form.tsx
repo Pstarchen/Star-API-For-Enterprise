@@ -48,14 +48,14 @@ export function AuthPolicyForm({ initial }: { initial: AuthPolicy }) {
         <PolicyToggle
           icon={LockKeyhole}
           title="邮箱密码登录"
-          description="允许已有用户使用邮箱和密码登录。关闭前必须有管理员已绑定可用的 GitHub 登录。"
+          description="允许已有用户使用邮箱和密码登录。关闭前必须有管理员已绑定可用的 GitHub 或 QQ 登录。"
           checked={policy.passwordLoginEnabled}
           onChange={(checked) => setPolicy((value) => ({ ...value, passwordLoginEnabled: checked, registrationEnabled: checked ? value.registrationEnabled : false }))}
         />
         <PolicyToggle
           icon={UserPlus}
           title="开放新用户注册"
-          description="允许个人与企业用户创建账号，也控制 GitHub 首次登录自动创建新账号。"
+          description="允许个人与企业用户创建账号，也控制 GitHub 或 QQ 首次登录自动创建新账号。"
           checked={policy.registrationEnabled}
           disabled={!policy.passwordLoginEnabled}
           onChange={(checked) => setPolicy((value) => ({ ...value, registrationEnabled: checked, registrationEmailVerificationRequired: checked ? value.registrationEmailVerificationRequired : false }))}

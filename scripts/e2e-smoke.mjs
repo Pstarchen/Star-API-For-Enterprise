@@ -224,6 +224,14 @@ async function main() {
   expectStatus(response.status, 302, "GitHub invalid callback redirect", await response.text());
   assert.match(response.headers.get("location") ?? "", /github_invalid_callback/);
 
+  response = await request("/api/v1/auth/oauth/qq");
+  expectStatus(response.status, 302, "QQ disabled redirect", await response.text());
+  assert.match(response.headers.get("location") ?? "", /qq_not_configured/);
+
+  response = await request("/api/v1/auth/oauth/qq/callback");
+  expectStatus(response.status, 302, "QQ invalid callback redirect", await response.text());
+  assert.match(response.headers.get("location") ?? "", /qq_invalid_callback/);
+
   result = await jsonRequest("/api/v1/admin/integrations", { method: "PATCH", body: {
     key: "github",
     enabled: true,
@@ -240,6 +248,30 @@ async function main() {
   assert.ok(new URL(githubLocation).searchParams.get("state"), "GitHub authorization must include state");
   assert.equal(new URL(githubLocation).searchParams.get("scope"), "read:user user:email");
   assert.equal(new URL(githubLocation).searchParams.get("redirect_uri"), `${portalUrl}/api/v1/auth/oauth/github/callback`);
+
+  result = await jsonRequest("/api/v1/admin/integrations", { method: "PATCH", body: {
+    key: "qq",
+    enabled: true,
+    publicConfig: { clientId: "e2e-qq-app-id" },
+    secrets: { clientSecret: "e2e-qq-app-key" },
+    secretAction: "replace",
+  } }, adminCookie);
+  expectStatus(result.response.status, 200, "enable QQ configuration", result.body);
+
+  response = await request("/api/v1/auth/oauth/qq");
+  expectStatus(response.status, 302, "QQ enabled authorization redirect", await response.text());
+  const qqLocation = response.headers.get("location") ?? "";
+  assert.equal(new URL(qqLocation).hostname, "graph.qq.com");
+  assert.equal(new URL(qqLocation).pathname, "/oauth2.0/authorize");
+  assert.equal(new URL(qqLocation).searchParams.get("response_type"), "code");
+  assert.equal(new URL(qqLocation).searchParams.get("client_id"), "e2e-qq-app-id");
+  assert.equal(new URL(qqLocation).searchParams.get("scope"), "get_user_info");
+  assert.ok(new URL(qqLocation).searchParams.get("state"), "QQ authorization must include state");
+  assert.equal(new URL(qqLocation).searchParams.get("redirect_uri"), `${portalUrl}/api/v1/auth/oauth/qq/callback`);
+
+  result = await jsonRequest("/api/v1/auth/oauth/qq/bind", { method: "POST", body: { action: "send", token: "expired-qq-pending-token-1234567890", email: `qq-${runId}@example.test` } });
+  expectStatus(result.response.status, 410, "expired QQ email binding token", result.body);
+  assert.equal(result.body.code, "qq_bind_expired");
 
   response = await request("/auth/oauth/callback?next=/admin/settings/integrations", {}, adminCookie);
   expectStatus(response.status, 200, "OAuth frontend completion page", await response.text());
@@ -1049,6 +1081,8 @@ components:
   result = await jsonRequest("/api/v1/admin/apis", { method: "PATCH", body: { id: providerApi.id, status: "PUBLISHED" } }, adminCookie);
   expectStatus(result.response.status, 200, "administrator approves provider API", result.body);
 
+  result = await jsonRequest("/api/v1/admin/integrations", { method: "PATCH", body: { key: "qq", enabled: false, publicConfig: { clientId: "e2e-qq-app-id" }, secrets: {}, secretAction: "remove" } }, adminCookie);
+  expectStatus(result.response.status, 200, "disable QQ configuration", result.body);
   result = await jsonRequest("/api/v1/admin/integrations", { method: "PATCH", body: { key: "github", enabled: false, publicConfig: { clientId: "e2e-client-id" }, secrets: {}, secretAction: "remove" } }, adminCookie);
   expectStatus(result.response.status, 200, "disable GitHub configuration", result.body);
 

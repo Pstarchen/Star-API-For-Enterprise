@@ -1,8 +1,8 @@
 "use client";
 
-import { Check, CheckCircle2, Code2, Copy, CreditCard, ExternalLink, Eye, EyeOff, GitBranch as Github, KeyRound, Landmark, Link2, Loader2, Mail, QrCode, Save, Send, ShieldCheck } from "lucide-react";
+import { Check, CheckCircle2, Code2, Copy, CreditCard, ExternalLink, Eye, EyeOff, GitBranch as Github, KeyRound, Landmark, Link2, Loader2, Mail, MessageCircle, QrCode, Save, Send, ShieldCheck } from "lucide-react";
 import { type FormEvent, useId, useMemo, useState } from "react";
-import { absoluteOAuthUrl, GITHUB_OAUTH_CALLBACK_PATH, GITHUB_OAUTH_SCOPES, OAUTH_FRONTEND_CALLBACK_PATH } from "@/lib/oauth";
+import { absoluteOAuthUrl, GITHUB_OAUTH_CALLBACK_PATH, GITHUB_OAUTH_SCOPES, OAUTH_FRONTEND_CALLBACK_PATH, QQ_OAUTH_CALLBACK_PATH, QQ_OAUTH_SCOPE } from "@/lib/oauth";
 import type { IntegrationKey } from "@/lib/server/integrations";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -45,6 +45,15 @@ const definitions: Record<IntegrationKey, Definition> = {
     fields: [
       { name: "clientId", label: "Client ID", placeholder: "GitHub OAuth Client ID", helper: "来自 GitHub OAuth App 的 Client ID。" },
       { name: "clientSecret", label: "Client Secret", placeholder: "GitHub OAuth Client Secret", helper: "仅在浏览器提交时传输，服务端加密保存且不会回传原文。", secret: true },
+    ],
+  },
+  qq: {
+    label: "QQ 登录",
+    description: "QQ 互联 OAuth 登录、账号绑定与新用户个人空间创建",
+    icon: MessageCircle,
+    fields: [
+      { name: "clientId", label: "App ID", placeholder: "QQ 互联网站应用 App ID", helper: "来自 QQ 互联管理中心的网站应用 App ID。" },
+      { name: "clientSecret", label: "App Key", placeholder: "QQ 互联网站应用 App Key", helper: "仅在浏览器提交时传输，服务端加密保存且不会回传原文。", secret: true },
     ],
   },
   smtp: {
@@ -239,6 +248,7 @@ function IntegrationEditor({ item, definition, publicUrl, onSaved }: { item: Int
       </div>
       <form onSubmit={submit}>
         {item.key === "github" && <GitHubSetupGuide publicUrl={publicUrl} />}
+        {item.key === "qq" && <QQSetupGuide publicUrl={publicUrl} />}
         <div className="grid gap-4 p-5 sm:grid-cols-2">
           {definition.fields.map((field) => <IntegrationField key={field.name} field={field} item={item} enabled={enabled} />)}
           {item.key === "smtp" && <label className="flex items-center gap-2 text-[10px]"><Checkbox name="secure" defaultChecked={item.publicConfig.secure === true} />使用 TLS 直连</label>}
@@ -266,7 +276,7 @@ function IntegrationField({ field, item, enabled }: { field: FieldSpec; item: In
   const inputId = useId();
   const value = field.secret ? "" : String(item.publicConfig[field.name] ?? "");
   const placeholder = field.secret && item.secretConfigured ? "留空保留当前密钥" : field.placeholder;
-  const required = item.key === "github" && enabled && (field.name === "clientId" || (field.name === "clientSecret" && !item.secretConfigured));
+  const required = (item.key === "github" || item.key === "qq") && enabled && (field.name === "clientId" || (field.name === "clientSecret" && !item.secretConfigured));
   return (
     <div className={field.multiline ? "block sm:col-span-2" : "block"}>
       <label htmlFor={inputId} className="mb-1.5 block text-[10px] font-semibold">{field.label}</label>
@@ -320,6 +330,46 @@ function GitHubSetupGuide({ publicUrl }: { publicUrl: string }) {
       <OAuthAddress icon={Link2} label="Homepage URL" description="填写站点公开访问域名" value={homepageUrl} copied={copied === "home"} copyLabel="复制" onCopy={() => copy(homepageUrl, "home")} />
       <OAuthAddress icon={KeyRound} label="后端回调地址" description="填写到 Authorization callback URL" value={backendCallbackUrl} copied={copied === "backend"} copyLabel="生成并复制" onCopy={() => copy(backendCallbackUrl, "backend")} />
       <OAuthAddress icon={CheckCircle2} label="前端回调地址" description="后端验证成功后的平台内部完成页，无需填写到 GitHub" value={OAUTH_FRONTEND_CALLBACK_PATH} copied={copied === "frontend"} copyLabel="复制" onCopy={() => copy(OAUTH_FRONTEND_CALLBACK_PATH, "frontend")} />
+    </div>
+    {copyError && <FormMessage className="mt-3">{copyError}</FormMessage>}
+  </div>;
+}
+
+function QQSetupGuide({ publicUrl }: { publicUrl: string }) {
+  const [copied, setCopied] = useState("");
+  const [copyError, setCopyError] = useState("");
+  const homepageUrl = publicOrigin(publicUrl);
+  const backendCallbackUrl = oauthAddress(publicUrl, QQ_OAUTH_CALLBACK_PATH);
+
+  async function copy(value: string, key: string) {
+    setCopyError("");
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => current === key ? "" : current), 1400);
+    } catch {
+      setCopyError("浏览器未授权写入剪贴板，请手动选中地址复制。");
+    }
+  }
+
+  return <div className="border-b border-[var(--line)] bg-[var(--surface-subtle)] px-5 py-5">
+    <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+      <div className="flex gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-control)] bg-[#12b7f5] text-white"><MessageCircle className="size-4" /></span><div><strong className="block text-[12px]">创建 QQ 互联网站应用</strong><p className="mt-1 max-w-xl text-[10px] leading-5 text-[var(--muted)]">请在 QQ 互联管理中心创建网站应用，填写站点域名和后端回调地址，再把 App ID 与 App Key 填入下方。</p></div></div>
+      <Button asChild type="button" variant="secondary" size="sm"><a href="https://connect.qq.com/manage/" target="_blank" rel="noreferrer">打开 QQ 互联管理中心<ExternalLink /></a></Button>
+    </div>
+
+    <ol className="mt-5 grid border-y border-[var(--line)] sm:grid-cols-3 sm:divide-x sm:divide-[var(--line)]">
+      <SetupStep number="01" title="创建网站应用" text="进入 QQ 互联管理中心，创建网站应用并完成域名验证。" />
+      <SetupStep number="02" title="填写回调地址" text="将后端回调地址填写到应用的回调地址配置，并保持域名一致。" />
+      <SetupStep number="03" title="保存并启用" text="复制 App ID 与 App Key，填入下方凭据；保存成功后再开启 QQ 登录。" />
+    </ol>
+
+    <div className="mt-4 flex flex-wrap items-center gap-2 text-[10px]"><ShieldCheck className="size-3.5 text-[var(--success)]" /><span className="font-semibold">请求权限</span><code className="rounded-[6px] border border-[var(--line)] bg-[var(--surface-raised)] px-2 py-1 text-[9px] text-[var(--brand-strong)]">{QQ_OAUTH_SCOPE}</code></div>
+
+    <div className="mt-4 divide-y divide-[var(--line)] border-y border-[var(--line)]">
+      <OAuthAddress icon={Link2} label="Homepage URL" description="填写站点公开访问域名" value={homepageUrl} copied={copied === "home"} copyLabel="复制" onCopy={() => copy(homepageUrl, "home")} />
+      <OAuthAddress icon={KeyRound} label="后端回调地址" description="填写到 QQ 互联网站应用回调地址" value={backendCallbackUrl} copied={copied === "backend"} copyLabel="生成并复制" onCopy={() => copy(backendCallbackUrl, "backend")} />
+      <OAuthAddress icon={CheckCircle2} label="前端回调地址" description="平台内部完成页，无需填写到 QQ 互联" value={OAUTH_FRONTEND_CALLBACK_PATH} copied={copied === "frontend"} copyLabel="复制" onCopy={() => copy(OAUTH_FRONTEND_CALLBACK_PATH, "frontend")} />
     </div>
     {copyError && <FormMessage className="mt-3">{copyError}</FormMessage>}
   </div>;

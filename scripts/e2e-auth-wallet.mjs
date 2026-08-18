@@ -63,7 +63,7 @@ async function cleanup() {
   else await prisma.platformSetting.deleteMany({ where: { key: "auth-policy" } }).catch(() => undefined);
   if (originalEmailSettings) await prisma.platformSetting.upsert({ where: { key: "email-settings" }, create: originalEmailSettings, update: { value: originalEmailSettings.value } }).catch(() => undefined);
   else await prisma.platformSetting.deleteMany({ where: { key: "email-settings" } }).catch(() => undefined);
-  for (const key of ["smtp", "code-pay", "github", "alipay"]) {
+  for (const key of ["smtp", "code-pay", "github", "qq", "alipay"]) {
     const original = originalIntegrations.get(key);
     if (original) await prisma.integrationSetting.upsert({ where: { key }, create: original, update: { enabled: original.enabled, publicConfig: original.publicConfig, secretEncrypted: original.secretEncrypted } }).catch(() => undefined);
     else await prisma.integrationSetting.deleteMany({ where: { key } }).catch(() => undefined);
@@ -87,7 +87,7 @@ try {
     prisma.platformSetting.findUnique({ where: { key: "auth-policy" } }),
     prisma.platformSetting.findUnique({ where: { key: "email-settings" } }),
   ]);
-  for (const key of ["smtp", "code-pay", "github", "alipay"]) originalIntegrations.set(key, await prisma.integrationSetting.findUnique({ where: { key } }));
+  for (const key of ["smtp", "code-pay", "github", "qq", "alipay"]) originalIntegrations.set(key, await prisma.integrationSetting.findUnique({ where: { key } }));
 
   const hash = await passwordHash(password);
   const adminTenant = await prisma.tenant.create({ data: { name: `${marker}-admin-space`, type: "PERSONAL", status: "ACTIVE", plan: "e2e" } });

@@ -6,7 +6,7 @@
 
 - API 市场：首页展示精选接口，独立市场提供全量目录、搜索、分类、请求方法、计费方式、排序和列表/网格视图
 - API 详情：认证说明、参数文档、在线沙箱调试
-- 账户体系：首次安装向导、个人/企业注册、scrypt 密码哈希、持久会话、登录限流与工作空间切换
+- 账户体系：首次安装向导、个人/企业注册、scrypt 密码哈希、持久会话、登录限流与工作空间切换；支持 GitHub 与 QQ 互联 OAuth 登录及独立启停
 - 平台品牌：安装时配置网站名称、介绍、公开地址和图标，管理员可在后台维护网站图标、首屏图片及备案信息并同步到门户、控制台与浏览器元数据
 - API 分类：管理员可新增、排序、启停和删除未使用分类，API 新建、编辑、OpenAPI 导入及市场筛选共用同一套真实分类数据
 - API 契约：一个端点可同时启用 GET、POST 等方法；请求参数、返回参数、默认值、校验规则、返回格式与示例均可视化维护
@@ -26,6 +26,16 @@ npm run dev
 ```
 
 打开 `http://localhost:3000`。认证、租户、成员关系、会话、API Key、API 分类、市场目录和运营统计均使用 PostgreSQL 持久化。
+
+### 配置 QQ 登录
+
+管理员进入“平台设置 → 登录与邮件”，在“QQ 登录”页签填写 QQ 互联网站应用的 App ID 和 App Key，并开启开关。QQ 互联网站应用可在[管理中心](https://connect.qq.com/manage/)创建；将平台显示的后端回调地址填写到应用回调配置中，通常为：
+
+```text
+https://你的站点域名/api/v1/auth/oauth/qq/callback
+```
+
+平台按 QQ 互联网站应用 OAuth 2.0 server-side 流程请求 `get_user_info` 权限，回调会校验 `state`、交换 `access_token`、验证 `openid` 并读取昵称。首次 QQ 登录不会创建内部邮箱账号，而是跳转到邮箱绑定页；只有完成真实邮箱验证码验证后才会创建或绑定平台用户并建立会话。App Key 只会加密保存在数据库中，QQ 登录开关与 GitHub 登录互不影响。参考官方文档：[Authorization Code 获取 Access Token](https://wiki.connect.qq.com/%e4%bd%bf%e7%94%a8authorization_code%e8%8e%b7%e5%8f%96access_token)、[获取用户 OpenID](https://wiki.connect.qq.com/%e8%8e%b7%e5%8f%96%e7%94%a8%e6%88%b7openid_oauth2-0)、[get_user_info](https://wiki.connect.qq.com/get_user_info)。
 
 ## Docker 一键部署
 

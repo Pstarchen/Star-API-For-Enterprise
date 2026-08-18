@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const user = await getCurrentUser();
   if (user) redirect(user.platformRole === "ADMIN" ? "/admin" : "/console");
   const platform = await getPlatformConfig();
-  const [github, authPolicy] = await Promise.all([getIntegration("github"), getAuthPolicy()]);
+  const [github, qq, authPolicy] = await Promise.all([getIntegration("github"), getIntegration("qq"), getAuthPolicy()]);
   const params = await searchParams;
-  return <AuthShell title={`登录 ${platform.name}`} description="进入你的个人空间或企业工作区，继续管理接口与调用。"><LoginForm passwordLoginEnabled={authPolicy.passwordLoginEnabled} registrationEnabled={authPolicy.registrationEnabled} githubEnabled={github.enabled && github.configured} oauthError={typeof params.oauthError === "string" ? params.oauthError : undefined} nextPath={typeof params.next === "string" ? params.next : undefined} /></AuthShell>;
+  return <AuthShell title={`登录 ${platform.name}`} description="进入你的个人空间或企业工作区，继续管理接口与调用。"><LoginForm passwordLoginEnabled={authPolicy.passwordLoginEnabled} registrationEnabled={authPolicy.registrationEnabled} githubEnabled={github.enabled && github.configured} qqEnabled={qq.enabled && qq.configured} oauthError={typeof params.oauthError === "string" ? params.oauthError : undefined} nextPath={typeof params.next === "string" ? params.next : undefined} /></AuthShell>;
 }

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/server/auth";
-import { canAdministratorsUseGithubLogin, getAuthPolicy, saveAuthPolicy } from "@/lib/server/auth-policy";
+import { canAdministratorsUseOAuthLogin, getAuthPolicy, saveAuthPolicy } from "@/lib/server/auth-policy";
 import { getIntegration } from "@/lib/server/integrations";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
@@ -39,8 +39,8 @@ export async function PATCH(request: Request) {
     const smtp = await getIntegration("smtp");
     if (!smtp.enabled || !smtp.configured) return Response.json({ code: 409, message: "开启注册邮箱验证前，请先启用并完整配置 SMTP 邮件服务" }, { status: 409, headers: noStoreHeaders });
   }
-  if (!parsed.data.passwordLoginEnabled && !(await canAdministratorsUseGithubLogin())) {
-    return Response.json({ code: 409, message: "关闭邮箱密码登录前，请先启用 GitHub 登录并让至少一名活跃管理员完成账号绑定" }, { status: 409, headers: noStoreHeaders });
+  if (!parsed.data.passwordLoginEnabled && !(await canAdministratorsUseOAuthLogin())) {
+    return Response.json({ code: 409, message: "关闭邮箱密码登录前，请先启用 GitHub 或 QQ 登录，并让至少一名活跃管理员完成账号绑定" }, { status: 409, headers: noStoreHeaders });
   }
 
   const previous = await getAuthPolicy();

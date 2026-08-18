@@ -1,6 +1,6 @@
 {
   "name": "star-api-platform",
-  "version": "0.1.22",
+  "version": "0.1.23",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,6 +12,7 @@
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:image-signature": "node --experimental-strip-types scripts/test-image-signature.mjs",
     "test:docs": "node --experimental-strip-types scripts/test-docs-curl.mjs",
+    "test:qq-oauth": "node --experimental-strip-types scripts/test-qq-oauth.mjs",
     "test:response-contract": "node --experimental-strip-types scripts/test-response-contract.mjs",
     "test:php-package": "node --experimental-strip-types scripts/test-php-package.mjs",
     "test:timezone": "node --experimental-strip-types scripts/test-timezone.mjs",

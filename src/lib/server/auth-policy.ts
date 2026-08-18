@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
+import { getIntegration } from "@/lib/server/integrations";
 import { prisma } from "@/lib/server/prisma";
 
 export const AUTH_POLICY_SETTING_KEY = "auth-policy";
@@ -36,17 +37,16 @@ export async function saveAuthPolicy(policy: AuthPolicy) {
   });
 }
 
-export async function canAdministratorsUseGithubLogin() {
-  const github = await prisma.integrationSetting.findUnique({ where: { key: "github" } });
-  if (!github?.enabled || !github.secretEncrypted) return false;
-  const config = github.publicConfig && typeof github.publicConfig === "object" && !Array.isArray(github.publicConfig)
-    ? github.publicConfig as Record<string, unknown>
-    : {};
-  if (typeof config.clientId !== "string" || !config.clientId.trim()) return false;
-
-  const linkedAdmin = await prisma.oAuthAccount.findFirst({
-    where: { provider: "github", user: { platformRole: "ADMIN", status: "ACTIVE" } },
-    select: { id: true },
-  });
-  return Boolean(linkedAdmin);
+export async function canAdministratorsUseOAuthLogin(excludeProvider?: "github" | "qq") {
+  const providers = (["github", "qq"] as const).filter((provider) => provider !== excludeProvider);
+  const available = await Promise.all(providers.map(async (provider) => {
+    const integration = await getIntegration(provider);
+    if (!integration.enabled || !integration.configured) return false;
+    const linkedAdmin = await prisma.oAuthAccount.findFirst({
+      where: { provider, user: { platformRole: "ADMIN", status: "ACTIVE" } },
+      select: { id: true },
+    });
+    return Boolean(linkedAdmin);
+  }));
+  return available.some(Boolean);
 }

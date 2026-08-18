@@ -235,6 +235,23 @@ model OAuthState {
   @@index([provider, expiresAt])
 }
 
+model OAuthPendingLogin {
+  id                 String   @id @default(cuid())
+  provider           String
+  providerAccountId String
+  username           String?
+  redirectPath       String
+  tokenHash          String   @unique
+  email              String?
+  emailCodeHash      String?
+  emailCodeExpiresAt DateTime?
+  expiresAt          DateTime
+  createdAt          DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([expiresAt])
+}
+
 model EmailVerificationToken {
   id        String    @id @default(cuid())
   userId    String

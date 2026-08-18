@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { getCurrentUser } from "@/lib/server/auth";
-import { getIntegration, integrationKeys, integrationSummaries, saveIntegration } from "@/lib/server/integrations";
+import { getIntegration, integrationKeys, integrationSummaries, saveIntegration, type IntegrationKey } from "@/lib/server/integrations";
 import { prisma } from "@/lib/server/prisma";
 import { noStoreHeaders, requestIp } from "@/lib/server/request";
-import { getAuthPolicy } from "@/lib/server/auth-policy";
+import { canAdministratorsUseOAuthLogin, getAuthPolicy } from "@/lib/server/auth-policy";
 
 const schema = z.object({
   key: z.enum(integrationKeys),
@@ -26,6 +26,10 @@ function isHttpUrl(value: unknown) {
   try { return ["http:", "https:"].includes(new URL(value).protocol); } catch { return false; }
 }
 
+function isOAuthKey(key: IntegrationKey): key is "github" | "qq" {
+  return key === "github" || key === "qq";
+}
+
 export async function GET() {
   const auth = await authorize();
   if ("error" in auth) return auth.error;
@@ -38,7 +42,7 @@ export async function PATCH(request: Request) {
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return Response.json({ code: 400, message: "集成配置格式不正确", details: z.flattenError(parsed.error) }, { status: 400, headers: noStoreHeaders });
   const input = parsed.data;
-  if (input.key === "github" && !input.enabled && !(await getAuthPolicy()).passwordLoginEnabled) {
+  if (isOAuthKey(input.key) && !input.enabled && !(await getAuthPolicy()).passwordLoginEnabled && !(await canAdministratorsUseOAuthLogin(input.key))) {
     return Response.json({ code: 409, message: "邮箱密码登录已关闭，不能停用当前唯一的管理员登录方式" }, { status: 409, headers: noStoreHeaders });
   }
   if (input.key === "smtp") {
@@ -48,8 +52,10 @@ export async function PATCH(request: Request) {
   const previous = await getIntegration(input.key, true);
   const nextSecrets = input.secretAction === "remove" ? {} : input.secretAction === "keep" ? previous.secrets : { ...previous.secrets, ...(input.secrets ?? {}) };
   const secretConfigured = input.key === "bank-transfer" || input.key === "code-pay" || Object.keys(nextSecrets).length > 0;
-  const githubClientId = input.key === "github" && typeof input.publicConfig.clientId === "string" ? input.publicConfig.clientId.trim() : "";
-  if (input.key === "github" && input.enabled && !githubClientId) return Response.json({ code: 409, message: "启用 GitHub 登录前必须填写 Client ID" }, { status: 409, headers: noStoreHeaders });
+  const oauthClientId = isOAuthKey(input.key) && typeof input.publicConfig.clientId === "string" ? input.publicConfig.clientId.trim() : "";
+  const oauthLabel = input.key === "qq" ? "QQ" : "GitHub";
+  if (isOAuthKey(input.key) && input.enabled && !oauthClientId) return Response.json({ code: 409, message: `启用 ${oauthLabel} 登录前必须填写 Client ID / App ID` }, { status: 409, headers: noStoreHeaders });
+  if (isOAuthKey(input.key) && input.enabled && (typeof nextSecrets.clientSecret !== "string" || !nextSecrets.clientSecret.trim())) return Response.json({ code: 409, message: `启用 ${oauthLabel} 登录前必须填写 Client Secret / App Key` }, { status: 409, headers: noStoreHeaders });
   if (input.key === "code-pay" && input.enabled && !input.publicConfig.qrImageUrl && !input.publicConfig.paymentUrl) return Response.json({ code: 409, message: "启用码支付前必须填写收款码图片地址或支付链接" }, { status: 409, headers: noStoreHeaders });
   if (input.key === "code-pay" && (!isHttpUrl(input.publicConfig.qrImageUrl) || !isHttpUrl(input.publicConfig.paymentUrl))) return Response.json({ code: 400, message: "码支付图片地址和支付链接必须使用 HTTP 或 HTTPS" }, { status: 400, headers: noStoreHeaders });
   if (input.key === "bank-transfer" && input.enabled && !input.publicConfig.accountName && !input.publicConfig.accountNumber) return Response.json({ code: 409, message: "启用对公转账前必须填写收款账户信息" }, { status: 409, headers: noStoreHeaders });
